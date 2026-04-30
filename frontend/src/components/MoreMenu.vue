@@ -1,5 +1,17 @@
 <template>
   <div class="more-menu">
+    <section v-if="stats" class="more-block stats-block">
+      <h4 class="more-title">Trip stats</h4>
+      <ul class="stats">
+        <li><span class="stat-num">{{ stats.points }}</span><span class="stat-lbl">pins</span></li>
+        <li><span class="stat-num">{{ stats.trails }}</span><span class="stat-lbl">trails</span></li>
+        <li v-if="stats.trailKm > 0"><span class="stat-num">{{ stats.trailKm }}</span><span class="stat-lbl">trail km</span></li>
+        <li v-if="stats.trailDPlus > 0"><span class="stat-num">{{ stats.trailDPlus.toLocaleString() }}</span><span class="stat-lbl">D+ m</span></li>
+        <li><span class="stat-num">{{ stats.days }}</span><span class="stat-lbl">days</span></li>
+        <li v-if="stats.driveKm > 0"><span class="stat-num">≈{{ stats.driveKm.toLocaleString() }}</span><span class="stat-lbl">trip km</span></li>
+      </ul>
+    </section>
+
     <section class="more-block">
       <h4 class="more-title">Daylight</h4>
       <SunPanel :fallback-lat="fallbackLat" :fallback-lng="fallbackLng" />
@@ -49,6 +61,7 @@ defineProps({
   getBounds: { type: Function, required: true },
   theme: { type: String, required: true },
   copied: { type: Boolean, default: false },
+  stats: { type: Object, default: null },
 })
 const emit = defineEmits(['render-survival', 'clear-survival', 'copy-url'])
 </script>
@@ -76,5 +89,34 @@ const emit = defineEmits(['render-survival', 'clear-survival', 'copy-url'])
 .more-row :deep(.btn-tiny) {
   min-width: 9rem;
   padding-block: 0.5rem;
+}
+
+/* Stats grid */
+.stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 0.5rem 0.7rem;
+}
+.stats li {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dotted var(--cream-edge);
+}
+.stat-num {
+  font-family: var(--display);
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.stat-lbl {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
 }
 </style>

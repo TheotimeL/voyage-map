@@ -33,11 +33,15 @@
         <CategoryFilters :points="mapData.points" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
         <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
         <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
-        <p v-if="!trailPoints.length" class="hint mono">Drop a .gpx anywhere on the map.</p>
-        <label class="btn btn-tiny gpx-pick">
-          + GPX
-          <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
-        </label>
+        <p class="hint mono gpx-hint">
+          <span>Trails:</span>
+          <span>drop a <code>.gpx</code> on the map</span>
+          <span class="sep">·</span>
+          <label class="link-pick">
+            <span>pick a file</span>
+            <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
+          </label>
+        </p>
       </template>
 
       <template #itinerary>
@@ -56,6 +60,7 @@
           :get-bounds="getMapBounds"
           :theme="theme"
           :copied="copied"
+          :stats="tripStats"
           @render-survival="renderSurvival"
           @clear-survival="clearSurvival"
           @copy-url="copyUrl"
@@ -178,7 +183,7 @@ import InfoPanel from '@/components/InfoPanel.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import MapFab from '@/components/MapFab.vue'
 import { theme } from '@/lib/theme.js'
-import { buildElevationSeries } from '@/lib/elevation.js'
+import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap } from '@/lib/recents.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
 
@@ -236,6 +241,43 @@ function onElevHover(coord) {
     hoverMarker.setLatLng(coord)
   }
 }
+
+function haversineKm(a, b) {
+  const R = 6371, toRad = (x) => x * Math.PI / 180
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+const tripStats = computed(() => {
+  if (!mapData.value) return null
+  const ps = mapData.value.points || []
+  const trails = ps.filter((p) => p.gpx_data)
+  let trailKm = 0, trailDPlus = 0
+  for (const t of trails) {
+    try {
+      const { coords, elevations } = parseGPX(t.gpx_data)
+      const series = buildElevationSeries(coords, elevations)
+      if (series.length) {
+        trailKm += series[series.length - 1].dist / 1000
+        trailDPlus += elevationStats(series).gain
+      }
+    } catch { /* skip bad GPX */ }
+  }
+  const days = (mapData.value.itinerary || [])
+  const located = days.filter((d) => d.lat != null && d.lng != null)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  let driveKm = 0
+  for (let i = 0; i < located.length - 1; i++) driveKm += haversineKm(located[i], located[i + 1])
+  return {
+    points: ps.length - trails.length,
+    trails: trails.length,
+    trailKm: Math.round(trailKm * 10) / 10,
+    trailDPlus: Math.round(trailDPlus),
+    days: days.length,
+    driveKm: Math.round(driveKm),
+  }
+})
 
 const visiblePoints = computed(() => {
   if (!mapData.value) return []
@@ -1015,6 +1057,25 @@ onBeforeUnmount(() => {
 /* Routes section */
 .gpx-pick { cursor: pointer; }
 .hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
+.gpx-hint {
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--cream-edge);
+  margin-top: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+.gpx-hint code { font-family: var(--mono); color: var(--vermillion); padding: 0 2px; }
+.gpx-hint .sep { color: var(--ink-faded); opacity: 0.6; }
+.link-pick {
+  cursor: pointer;
+  color: var(--vermillion);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-pick:hover { color: var(--vermillion-deep); }
 
 /* Today banner */
 .today-banner {

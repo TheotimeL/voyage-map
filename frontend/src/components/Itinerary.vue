@@ -49,12 +49,12 @@
     </ol>
     <p v-else class="hint mono">No days yet — add one below.</p>
 
-    <form class="iti-add" @submit.prevent="addDay">
+    <form class="iti-add" @submit.prevent="addEmptyDay">
       <input v-model="form.date" type="date" class="field tiny" :min="firstISO" required />
-      <input v-model="form.label" type="text" class="field tiny" placeholder="Where?" maxlength="200" />
-      <button class="btn btn-tiny" type="submit">+ Add</button>
+      <button class="btn btn-tiny" type="submit" title="Add an empty day with no location">+ Day</button>
     </form>
-    <p class="hint mono">Set a date + label, drag its pin on the map to position it.</p>
+    <GeocoderSearch placeholder="Search a place to drop on this day…" @pick="onAddPick" />
+    <p class="hint mono">Pick a place to add a day with a real location, or +Day for an unanchored placeholder.</p>
   </section>
 </template>
 
@@ -62,6 +62,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { todayISO } from '@/util.js'
 import { dailyForecast, glyphFor } from '@/lib/weather.js'
+import GeocoderSearch from './GeocoderSearch.vue'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
@@ -138,11 +139,16 @@ function daysUntil(iso) {
   return `T+${-diff} days`
 }
 
-async function addDay() {
+function addEmptyDay() {
   if (!form.date) return
-  emit('add', { date: form.date, label: form.label.trim() || null })
-  form.label = ''
-  form.date = suggestedNewDate.value  // chain straight into next day
+  emit('add', { date: form.date, label: null })
+  form.date = suggestedNewDate.value
+}
+function onAddPick(result) {
+  if (!form.date) return
+  const label = result.label.split(',')[0].trim().slice(0, 200) || null
+  emit('add', { date: form.date, label, lat: result.lat, lng: result.lng })
+  form.date = suggestedNewDate.value
 }
 
 function del(d) {
@@ -282,9 +288,9 @@ function legKm(a, b) {
 }
 
 .iti-add {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   margin-top: 0.4rem;
 }
 .field.tiny { padding: 0.45rem 0.6rem; font-size: 0.88rem; }

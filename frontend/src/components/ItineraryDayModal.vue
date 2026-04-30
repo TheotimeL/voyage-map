@@ -6,8 +6,19 @@
       <label class="lbl">Date</label>
       <input ref="dateInput" v-model="form.date" type="date" class="field" required />
 
-      <label class="lbl">Label (just a name)</label>
-      <input v-model="form.label" class="field" maxlength="200" placeholder="e.g. Las Vegas" />
+      <label class="lbl">Name</label>
+      <input v-model="form.label" class="field" maxlength="200" placeholder="e.g. Hôtel Paradiso, Day 3, Camp Joshua…" />
+
+      <label class="lbl">Location</label>
+      <GeocoderSearch
+        :placeholder="hasCoord ? 'Change the location…' : 'Search a place…'"
+        @pick="onPick"
+      />
+      <div v-if="hasCoord" class="coord-readout">
+        <span class="coord mono">{{ formatLat(form.lat) }} · {{ formatLng(form.lng) }}</span>
+        <button type="button" class="coord-clear" @click="clearLocation" title="Clear location">×</button>
+      </div>
+      <p class="hint mono">After saving, drag the day's pin on the map to fine-tune.</p>
 
       <label class="lbl">Notes</label>
       <textarea
@@ -18,26 +29,6 @@
         placeholder="Hotel, plan, anything to remember"
       />
 
-      <label class="lbl">Location on the map</label>
-      <div class="loc-row">
-        <span v-if="hasCoord" class="coord mono">
-          {{ formatLat(modelValue.lat) }} · {{ formatLng(modelValue.lng) }}
-        </span>
-        <span v-else class="coord muted mono">— no location yet —</span>
-        <button
-          type="button"
-          class="btn btn-tiny btn-ghost"
-          :disabled="!form.label.trim() || locating"
-          @click="locateFromLabel"
-        >
-          {{ locating ? 'Searching…' : 'Locate from label' }}
-        </button>
-      </div>
-      <p class="hint mono">
-        After saving, drag the day's pin on the map to refine the spot.
-      </p>
-      <p v-if="locateError" class="error sm">{{ locateError }}</p>
-
       <div class="row">
         <button type="button" class="btn btn-ghost" @click="$emit('close')">Cancel</button>
         <button type="submit" class="btn">Save</button>
@@ -47,14 +38,14 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted, useTemplateRef, computed } from 'vue'
+import { reactive, onMounted, useTemplateRef, computed } from 'vue'
 import { formatLat, formatLng } from '@/util.js'
-import { geocode } from '@/api.js'
+import GeocoderSearch from './GeocoderSearch.vue'
 
 const props = defineProps({
   modelValue: { type: Object, required: true },
 })
-const emit = defineEmits(['save', 'close', 'locate-candidates'])
+const emit = defineEmits(['save', 'close'])
 
 const form = reactive({
   date: props.modelValue.date,
@@ -64,33 +55,24 @@ const form = reactive({
   lng: props.modelValue.lng ?? null,
 })
 const hasCoord = computed(() => form.lat != null && form.lng != null)
-const locating = ref(false)
-const locateError = ref('')
 
 const dateInput = useTemplateRef('dateInput')
 onMounted(() => dateInput.value?.focus())
 
-async function locateFromLabel() {
-  const q = form.label.trim()
-  if (!q) return
-  locating.value = true
-  locateError.value = ''
-  try {
-    const results = await geocode(q)
-    if (!results.length) { locateError.value = 'No match found.'; return }
-    if (results.length === 1 || results[0].importance > (results[1]?.importance ?? 0) + 0.15) {
-      // Strong winner — apply immediately.
-      form.lat = results[0].lat
-      form.lng = results[0].lng
-    } else {
-      // Multiple candidates — bubble up to MapView so it can show its picker.
-      emit('locate-candidates', { day: props.modelValue, results: results.slice(0, 6) })
-    }
-  } catch (e) {
-    locateError.value = e?.message || 'Search failed.'
-  } finally {
-    locating.value = false
+function onPick(result) {
+  form.lat = result.lat
+  form.lng = result.lng
+  // If the user has not given a name yet, seed it from the picked place's
+  // first part — keeps "name" decoupled from "location" but bootstraps it
+  // for the common case.
+  if (!form.label.trim() && result.label) {
+    form.label = result.label.split(',')[0].trim().slice(0, 200)
   }
+}
+
+function clearLocation() {
+  form.lat = null
+  form.lng = null
 }
 
 function submit() {
@@ -110,7 +92,7 @@ function submit() {
   max-height: 90vh;
   overflow-y: auto;
   display: grid;
-  gap: 0.85rem;
+  gap: 0.7rem;
   padding: 1.4rem 1.5rem;
 }
 .lbl {
@@ -121,21 +103,31 @@ function submit() {
   color: var(--ink-faded);
   margin-top: 0.1rem;
 }
-.loc-row {
+.coord-readout {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.7rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.7rem;
+  background: var(--cream);
+  border-radius: 3px;
+  border: 1px dashed var(--cream-edge);
 }
-.coord { font-size: 0.85rem; color: var(--ink); }
-.coord.muted { color: var(--ink-faded); }
+.coord-clear {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+.coord-clear:hover { color: var(--vermillion); }
 .row {
   display: flex;
   gap: 0.6rem;
   justify-content: flex-end;
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
 }
 .hint { color: var(--ink-faded); font-size: 0.72rem; margin: 0; letter-spacing: 0.06em; }
-.error.sm { font-size: 0.78rem; color: var(--vermillion-deep); margin: 0; }
 </style>
