@@ -34,7 +34,7 @@ defineEmits(['update:collapsed'])
   border: 1px solid var(--vermillion);
   border-radius: 4px;
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.06);
-  z-index: 400;
+  z-index: 800;
   overflow: hidden;
 }
 .desktop-dock.collapsed { width: 56px; }
