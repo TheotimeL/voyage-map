@@ -127,6 +127,7 @@
         v-if="activeSeries.length"
         :series="activeSeries"
         :name="activeTrackName"
+        :color="activeTrackColor"
         @hover="onElevHover"
         @close="activeTrailPointId = null"
       />
@@ -235,6 +236,10 @@ const activeSeries = computed(() => {
 const activeTrackName = computed(() => {
   const t = trailPoints.value.find((x) => x.id === activeTrailPointId.value)
   return t?.title || ''
+})
+const activeTrackColor = computed(() => {
+  const t = trailPoints.value.find((x) => x.id === activeTrailPointId.value)
+  return t?.color || null
 })
 
 let hoverMarker = null

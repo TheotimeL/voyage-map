@@ -1,5 +1,5 @@
 <template>
-  <section v-if="series.length" class="elev">
+  <section v-if="series.length" class="elev" :style="color ? { '--trail-color': color } : null">
     <div class="elev-head">
       <p class="eyebrow">{{ name || 'Elevation' }}</p>
       <p class="elev-stats mono">
@@ -32,6 +32,7 @@ import { elevationStats } from '@/lib/elevation.js'
 const props = defineProps({
   series: { type: Array, required: true },
   name: { type: String, default: '' },
+  color: { type: String, default: null },
 })
 const emit = defineEmits(['hover', 'close'])
 
@@ -112,9 +113,9 @@ function onLeave() {
 }
 .btn-icon-tiny:hover { color: var(--vermillion); }
 .elev-svg { width: 100%; height: 88px; display: block; }
-.area { fill: rgba(232, 93, 60, 0.15); }
-.line { fill: none; stroke: var(--vermillion); stroke-width: 1.6; }
+.area { fill: var(--trail-color, var(--vermillion)); fill-opacity: 0.18; }
+.line { fill: none; stroke: var(--trail-color, var(--vermillion)); stroke-width: 1.8; }
 .cursor { stroke: var(--ink-faded); stroke-width: 1; stroke-dasharray: 3 3; }
-.dot { fill: var(--vermillion); stroke: var(--paper); stroke-width: 1.5; }
+.dot { fill: var(--trail-color, var(--vermillion)); stroke: var(--paper); stroke-width: 1.5; }
 .elev-readout { font-size: 0.8rem; color: var(--ink-soft); margin: 0; }
 </style>
