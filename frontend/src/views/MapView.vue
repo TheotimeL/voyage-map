@@ -2,9 +2,9 @@
   <main class="mapview">
     <InfoPanel
       v-if="mapData"
-      :tabs="v2Tabs"
-      :active="v2Active"
-      @update:active="(k) => v2Active = k"
+      :tabs="tabs"
+      :active="activeTab"
+      @update:active="(k) => activeTab = k"
     >
       <template #header>
         <h2 class="title">
@@ -162,10 +162,6 @@ import PointDetailCard from '@/components/PointDetailCard.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
 import RadiusSlider from '@/components/RadiusSlider.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
-import PrecacheButton from '@/components/PrecacheButton.vue'
-import SunPanel from '@/components/SunPanel.vue'
-import SurvivalLayer from '@/components/SurvivalLayer.vue'
-import ThemeToggle from '@/components/ThemeToggle.vue'
 import ElevationProfile from '@/components/ElevationProfile.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
@@ -181,8 +177,8 @@ const loading = ref(true)
 const error = ref('')
 const titleDraft = ref('')
 const radiusDraft = ref(5000)
-const v2Active = ref('places')
-const v2Tabs = [
+const activeTab = ref('places')
+const tabs = [
   { key: 'places', label: 'Places', icon: '📍' },
   { key: 'itinerary', label: 'Itinerary', icon: '🗓' },
   { key: 'more', label: 'More', icon: '⋯' },
@@ -571,16 +567,6 @@ async function importGpxFile(file) {
     if (line && leaflet) leaflet.fitBounds(line.getBounds(), { padding: [40, 40] })
   } catch (e) {
     gpxError.value = e.message || 'Could not import GPX.'
-  }
-}
-
-async function deleteTrailPoint(id) {
-  try {
-    await api.deletePoint(props.slug, id)
-    mapData.value.points = (mapData.value.points || []).filter((p) => p.id !== id)
-    removeTrackLine(id)
-  } catch (e) {
-    error.value = e.message
   }
 }
 
