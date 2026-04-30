@@ -262,3 +262,21 @@ input[type="range"]::-moz-range-thumb {
 
 /* Utility */
 .hidden { display: none !important; }
+
+[data-theme="dark"] {
+  --paper: #14171a;
+  --cream: #1c2024;
+  --cream-deep: #0f1114;
+  --cream-edge: #2a2f35;
+  --ink: #ebe5d8;
+  --ink-soft: #b8b2a4;
+  --ink-faded: #6e6a62;
+  --vermillion: #ff7a55;
+  --vermillion-deep: #e85d3c;
+}
+
+[data-theme="dark"] body { background: var(--paper); color: var(--ink); }
+[data-theme="dark"] .map { background: var(--cream-deep); }
+
+[data-theme="dark"] .pin { filter: drop-shadow(0 0 1px rgba(255,255,255,0.4)); }
+[data-theme="dark"] .leaflet-container { background: #0c0e10; }
