@@ -7,7 +7,8 @@
       v-for="p in points"
       :key="p.id"
       class="point"
-      :class="{ active: p.id === activeId }"
+      :class="{ active: p.id === activeId, 'is-trail': !!p.gpx_data }"
+      :style="p.gpx_data && p.color ? { '--swatch': p.color } : null"
       @click="$emit('select', p)"
     >
       <span class="pin-mini">{{ emojiFor(p.category) }}</span>
@@ -95,4 +96,5 @@ function untitled(p) {
   overflow: hidden;
 }
 .coord { margin-top: 0.2rem; font-size: 0.78rem; }
+.point.is-trail { border-left: 4px solid var(--swatch, var(--ink-faded)); padding-left: 0.6rem; }
 </style>

@@ -148,10 +148,46 @@
       :active="v2Active"
       @update:active="(k) => v2Active = k"
     >
-      <template #header><p class="mono">v2 dock — {{ mapData.title || 'Untitled voyage' }}</p></template>
-      <template #places><p>Places tab — empty for now</p></template>
-      <template #itinerary><p>Itinerary tab — empty for now</p></template>
-      <template #more><p>More menu — empty for now</p></template>
+      <template #header>
+        <h2 class="title">
+          <input
+            v-model="titleDraft"
+            class="title-input"
+            placeholder="Untitled voyage"
+            maxlength="120"
+            @blur="commitTitle"
+            @keydown.enter="$event.target.blur()"
+          />
+        </h2>
+        <p class="coord meta">
+          <span class="meta-icon">⌖</span>
+          <span>{{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}</span>
+        </p>
+        <div class="radius-row">
+          <span class="radius-label mono">Radius · {{ formatRadius(mapData.radius_m) }}</span>
+          <RadiusSlider v-model="radiusDraft" @update:modelValue="liveRadius" @change="commitRadius" />
+        </div>
+      </template>
+
+      <template #places>
+        <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
+        <button class="btn btn-tiny" @click="startNewPin">+ Drop</button>
+        <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
+          ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
+        </button>
+        <p v-if="locateError" class="error sm">{{ locateError }}</p>
+        <CategoryFilters :points="mapData.points" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
+        <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
+        <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
+        <p class="hint mono">Drop a .gpx anywhere on the map.</p>
+        <label class="btn btn-tiny gpx-pick v2-gpx">
+          + GPX
+          <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
+        </label>
+      </template>
+
+      <template #itinerary><p>Itinerary tab — coming in Task 8</p></template>
+      <template #more><p>More menu — coming in Task 9</p></template>
     </InfoPanel>
 
     <div
