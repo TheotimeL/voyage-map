@@ -595,6 +595,18 @@ function startNewPin() {
 
 function onSelectPoint(p) {
   openDetail(p)
+  // Selecting a trail-point also reveals its elevation profile / brings the
+  // polyline to the front so the list-click feels like a "show me this trail".
+  if (p.gpx_data) {
+    activeTrailPointId.value = p.id
+    if (leaflet) {
+      const line = trackLines.get(p.id)
+      if (line) leaflet.fitBounds(line.getBounds(), { padding: [60, 60], animate: true, maxZoom: 14 })
+    }
+  } else if (leaflet) {
+    // For regular pins, just centre on the marker.
+    leaflet.panTo([p.lat, p.lng], { animate: true })
+  }
 }
 
 function renderTrack(track, idx) {
