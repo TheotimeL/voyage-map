@@ -25,6 +25,11 @@
               {{ d.label || 'Untitled' }}
               <span v-if="d.lat == null" class="locate-hint" title="Click to locate via search">⌖</span>
             </button>
+            <p v-if="forecastFor(d)" class="iti-wx mono">
+              {{ glyphFor(forecastFor(d).code) }}
+              {{ forecastFor(d).tMax }}° / {{ forecastFor(d).tMin }}°
+              <template v-if="forecastFor(d).precip > 0.5"> · {{ forecastFor(d).precip.toFixed(1) }}mm</template>
+            </p>
             <p v-if="d.notes" class="iti-notes">{{ d.notes }}</p>
           </div>
           <button class="iti-del" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
@@ -48,8 +53,9 @@
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { todayISO } from '@/util.js'
+import { dailyForecast, glyphFor } from '@/lib/weather.js'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
@@ -57,6 +63,21 @@ const props = defineProps({
 const emit = defineEmits(['add', 'delete', 'go'])
 
 const today = computed(() => todayISO())
+
+// Lazy weather lookup for days within the forecast window. Stored as a
+// reactive map of "id" → forecast object so the template re-renders as
+// fetches resolve.
+const wxMap = ref({})
+function forecastFor(d) { return wxMap.value[d.id] || null }
+async function refreshWeather(days) {
+  for (const d of days) {
+    if (d.id == null || d.lat == null || d.lng == null) continue
+    if (wxMap.value[d.id]) continue
+    const wx = await dailyForecast(d.lat, d.lng, d.date)
+    if (wx) wxMap.value = { ...wxMap.value, [d.id]: wx }
+  }
+}
+watch(() => props.days, (next) => { refreshWeather(next || []) }, { immediate: true })
 
 const form = reactive({ date: today.value, label: '' })
 
@@ -217,6 +238,13 @@ function legKm(a, b) {
   color: var(--ink-faded);
   letter-spacing: 0.14em;
   padding: 0.15rem 0 0.15rem 2.6rem;
+}
+
+.iti-wx {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  letter-spacing: 0.04em;
 }
 
 .iti-add {
