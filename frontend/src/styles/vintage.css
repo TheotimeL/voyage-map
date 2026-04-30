@@ -233,6 +233,18 @@ input[type="range"]::-moz-range-thumb {
 }
 .iti-pin:hover { background: var(--vermillion); }
 
+.survival-pin .sp {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  font-size: 0.95rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.18);
+}
+
 /* "You are here" blue dot (Apple/Google Maps style) */
 .me-dot {
   width: 18px;

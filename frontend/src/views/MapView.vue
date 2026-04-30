@@ -85,6 +85,14 @@
         />
 
         <hr class="rule" />
+        <p class="eyebrow">Survival</p>
+        <SurvivalLayer
+          :get-bounds="getMapBounds"
+          @render="renderSurvival"
+          @clear="clearSurvival"
+        />
+
+        <hr class="rule" />
 
         <div class="list-head">
           <p class="eyebrow">Routes</p>
@@ -212,6 +220,7 @@ import RadiusSlider from '@/components/RadiusSlider.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
 import PrecacheButton from '@/components/PrecacheButton.vue'
 import SunPanel from '@/components/SunPanel.vue'
+import SurvivalLayer from '@/components/SurvivalLayer.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import ElevationProfile from '@/components/ElevationProfile.vue'
 import { theme } from '@/lib/theme.js'
@@ -319,6 +328,30 @@ let myAccuracyCircle = null
 const trackLines = new Map() // track id → L.polyline
 const itineraryMarkers = new Map() // day id → L.marker
 let itineraryLine = null
+const survivalGroup = ref(null)
+function getMapBounds() { return leaflet?.getBounds() }
+function renderSurvival(items) {
+  if (!leaflet) return
+  if (survivalGroup.value) leaflet.removeLayer(survivalGroup.value)
+  survivalGroup.value = L.layerGroup()
+  for (const it of items) {
+    const m = L.marker([it.lat, it.lng], {
+      icon: L.divIcon({
+        className: 'survival-pin',
+        html: `<div class="sp"><span>${it.icon}</span></div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      }),
+    })
+    m.bindTooltip(it.label, { direction: 'top', offset: [0, -10] })
+    survivalGroup.value.addLayer(m)
+  }
+  survivalGroup.value.addTo(leaflet)
+}
+function clearSurvival() {
+  if (survivalGroup.value && leaflet) leaflet.removeLayer(survivalGroup.value)
+  survivalGroup.value = null
+}
 const gpxDragging = ref(false)
 const gpxError = ref('')
 let dragCounter = 0
