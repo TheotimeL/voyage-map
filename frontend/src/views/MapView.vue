@@ -515,7 +515,14 @@ function renderTrack(track, idx) {
       opacity: 0.9,
       lineCap: 'round',
       lineJoin: 'round',
+      bubblingMouseEvents: false,
     }).addTo(leaflet)
+    line.on('mouseover', () => line.setStyle({ weight: 6 }))
+    line.on('mouseout', () => line.setStyle({ weight: 4 }))
+    line.on('click', (e) => {
+      L.DomEvent.stopPropagation(e)
+      activeTrailPointId.value = activeTrailPointId.value === track.id ? null : track.id
+    })
     trackLines.set(track.id, line)
     return line
   } catch (e) {

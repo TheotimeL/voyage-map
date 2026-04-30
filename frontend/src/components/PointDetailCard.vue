@@ -48,7 +48,7 @@ function onDirections() {
 <style scoped>
 .detail {
   position: absolute;
-  top: 1rem;
+  top: 5.5rem; /* clears the Leaflet zoom controls (top-right) */
   right: 1rem;
   width: min(320px, calc(100% - 2rem));
   z-index: 800;

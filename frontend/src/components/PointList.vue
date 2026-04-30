@@ -14,6 +14,11 @@
       <span class="pin-mini">{{ emojiFor(p.category) }}</span>
       <div class="text">
         <div class="title">{{ p.title || untitled(p) }}</div>
+        <div v-if="p.gpx_data" class="trail-stats mono">
+          <template v-if="trailStats(p)">
+            {{ trailStats(p).km }} km · D+ {{ trailStats(p).gain }} m
+          </template>
+        </div>
         <div v-if="p.comment" class="comment">{{ p.comment }}</div>
         <div class="coord">
           {{ formatLat(p.lat) }} · {{ formatLng(p.lng) }}
@@ -24,7 +29,8 @@
 </template>
 
 <script setup>
-import { CATEGORIES, formatLat, formatLng } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, parseGPX } from '@/util.js'
+import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 
 defineProps({
   points: { type: Array, default: () => [] },
@@ -39,6 +45,26 @@ function emojiFor(key) {
 function untitled(p) {
   const cat = CATEGORIES.find((c) => c.key === p.category)
   return cat ? cat.label : 'Untitled'
+}
+
+// Trail-stats memo: parse each gpx_data once.
+const trailMemo = new Map() // id → { km, gain } | null
+function trailStats(p) {
+  if (!p.gpx_data) return null
+  if (trailMemo.has(p.id)) return trailMemo.get(p.id)
+  try {
+    const { coords, elevations } = parseGPX(p.gpx_data)
+    const series = buildElevationSeries(coords, elevations)
+    if (!series.length) { trailMemo.set(p.id, null); return null }
+    const km = (series[series.length - 1].dist / 1000).toFixed(1)
+    const { gain } = elevationStats(series)
+    const out = { km, gain: Math.round(gain) }
+    trailMemo.set(p.id, out)
+    return out
+  } catch {
+    trailMemo.set(p.id, null)
+    return null
+  }
 }
 </script>
 
@@ -96,5 +122,12 @@ function untitled(p) {
   overflow: hidden;
 }
 .coord { margin-top: 0.2rem; font-size: 0.78rem; }
+.trail-stats {
+  font-size: 0.76rem;
+  color: var(--swatch, var(--ink-faded));
+  margin-top: 0.2rem;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
 .point.is-trail { border-left: 4px solid var(--swatch, var(--ink-faded)); padding-left: 0.6rem; }
 </style>
