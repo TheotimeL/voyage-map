@@ -29,6 +29,10 @@
         placeholder="Hotel, plan, anything to remember"
       />
 
+      <button v-if="hasCoord" type="button" class="btn directions" @click="onDirections">
+        Directions →
+      </button>
+
       <div class="row">
         <button type="button" class="btn btn-ghost" @click="$emit('close')">Cancel</button>
         <button type="submit" class="btn">Save</button>
@@ -39,7 +43,7 @@
 
 <script setup>
 import { reactive, onMounted, useTemplateRef, computed } from 'vue'
-import { formatLat, formatLng } from '@/util.js'
+import { formatLat, formatLng, openInMaps } from '@/util.js'
 import GeocoderSearch from './GeocoderSearch.vue'
 
 const props = defineProps({
@@ -73,6 +77,10 @@ function onPick(result) {
 function clearLocation() {
   form.lat = null
   form.lng = null
+}
+
+function onDirections() {
+  openInMaps(form.lat, form.lng, form.label.trim() || 'Day')
 }
 
 function submit() {
@@ -123,6 +131,10 @@ function submit() {
   padding: 0 0.3rem;
 }
 .coord-clear:hover { color: var(--vermillion); }
+.directions {
+  width: 100%;
+  margin-top: 0.3rem;
+}
 .row {
   display: flex;
   gap: 0.6rem;
