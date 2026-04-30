@@ -18,3 +18,5 @@ frontend/.vite/
 # Playwright MCP test artifacts
 .playwright-mcp/
 /*.png
+
+.superpowers/
