@@ -1,5 +1,10 @@
 <template>
   <section v-if="info" class="sun-panel">
+    <p class="anchor mono">
+      <span v-if="gotPosition">⌖ your location</span>
+      <span v-else-if="placeName">📍 near {{ placeName }}</span>
+      <span v-else>📍 {{ fmtCoord(lat) }} · {{ fmtCoord(lng, 'lng') }}</span>
+    </p>
     <ul class="sun-rows">
       <li>
         <span class="lbl">Sunset</span>
@@ -20,8 +25,8 @@
         <span class="val">{{ formatTime(info.sunrise, gotPosition ? null : lng) }}</span>
       </li>
     </ul>
-    <p v-if="locating" class="hint mono">Using map center — share location for your real position.</p>
-    <button v-else-if="!gotPosition" class="locate-link" type="button" @click="locateMe">⌖ Use my location</button>
+    <p v-if="locating" class="hint mono">Locating…</p>
+    <button v-else-if="!gotPosition" class="locate-link" type="button" @click="locateMe">⌖ Use my location instead</button>
   </section>
 </template>
 
@@ -33,7 +38,13 @@ import { getMyLocation } from '@/util.js'
 const props = defineProps({
   fallbackLat: { type: Number, required: true },
   fallbackLng: { type: Number, required: true },
+  placeName: { type: String, default: '' },
 })
+
+function fmtCoord(v, kind = 'lat') {
+  const hemi = kind === 'lng' ? (v >= 0 ? 'E' : 'W') : (v >= 0 ? 'N' : 'S')
+  return `${Math.abs(v).toFixed(2)}° ${hemi}`
+}
 
 const lat = ref(props.fallbackLat)
 const lng = ref(props.fallbackLng)
@@ -66,6 +77,13 @@ onBeforeUnmount(() => { clearInterval(tickHandle.value) })
 
 <style scoped>
 .sun-panel { display: grid; gap: 0.35rem; }
+.anchor {
+  margin: 0 0 0.2rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
 .sun-rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.2rem; }
 .sun-rows li {
   display: grid;

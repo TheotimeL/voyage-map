@@ -14,7 +14,7 @@
 
     <section class="more-block">
       <h4 class="more-title">Daylight</h4>
-      <SunPanel :fallback-lat="fallbackLat" :fallback-lng="fallbackLng" />
+      <SunPanel :fallback-lat="fallbackLat" :fallback-lng="fallbackLng" :place-name="placeName" />
     </section>
 
     <section class="more-block">
@@ -62,6 +62,7 @@ defineProps({
   theme: { type: String, required: true },
   copied: { type: Boolean, default: false },
   stats: { type: Object, default: null },
+  placeName: { type: String, default: '' },
 })
 const emit = defineEmits(['render-survival', 'clear-survival', 'copy-url'])
 </script>

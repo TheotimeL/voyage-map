@@ -62,6 +62,7 @@
           :theme="theme"
           :copied="copied"
           :stats="tripStats"
+          :place-name="todayBanner?.day?.label || mapData.title || ''"
           @render-survival="renderSurvival"
           @clear-survival="clearSurvival"
           @copy-url="copyUrl"
@@ -613,17 +614,17 @@ function startNewPin() {
 
 function onSelectPoint(p) {
   openDetail(p)
-  // Selecting a trail-point also reveals its elevation profile / brings the
-  // polyline to the front so the list-click feels like a "show me this trail".
   if (p.gpx_data) {
     activeTrailPointId.value = p.id
     if (leaflet) {
       const line = trackLines.get(p.id)
       if (line) leaflet.fitBounds(line.getBounds(), { padding: [60, 60], animate: true, maxZoom: 14 })
     }
-  } else if (leaflet) {
-    // For regular pins, just centre on the marker.
-    leaflet.panTo([p.lat, p.lng], { animate: true })
+  } else {
+    // Switching to a non-trail point: drop any open elevation profile so the
+    // map view stays focused on the new pin.
+    activeTrailPointId.value = null
+    if (leaflet) leaflet.panTo([p.lat, p.lng], { animate: true })
   }
 }
 

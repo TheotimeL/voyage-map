@@ -50,12 +50,14 @@
     </ol>
     <p v-else class="hint mono">No days yet — add one below.</p>
 
-    <form class="iti-add" @submit.prevent="addEmptyDay">
-      <input v-model="form.date" type="date" class="field tiny" :min="firstISO" required />
-      <button class="btn btn-tiny" type="submit" title="Add an empty day with no location">+ Day</button>
-    </form>
-    <GeocoderSearch placeholder="Search a place to drop on this day…" @pick="onAddPick" />
-    <p class="hint mono">Pick a place to add a day with a real location, or +Day for an unanchored placeholder.</p>
+    <section class="add-block">
+      <p class="add-eyebrow mono">Add a day</p>
+      <form class="iti-add" @submit.prevent="addEmptyDay">
+        <input v-model="form.date" type="date" class="field add-date" :min="firstISO" required />
+        <button class="btn btn-add" type="submit" title="Add an empty day with no location">+ Day</button>
+      </form>
+      <GeocoderSearch placeholder="…or search a place to drop on this day" @pick="onAddPick" />
+    </section>
   </section>
 </template>
 
@@ -296,13 +298,50 @@ function legKm(a, b) {
   letter-spacing: 0.04em;
 }
 
+.add-block {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed var(--cream-edge);
+  display: grid;
+  gap: 0.5rem;
+}
+.add-eyebrow {
+  font-size: 0.65rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  margin: 0;
+}
 .iti-add {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.4rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  gap: 0.5rem;
 }
 .field.tiny { padding: 0.45rem 0.6rem; font-size: 0.88rem; }
+.field.add-date {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.92rem;
+  height: 38px;
+  box-sizing: border-box;
+}
+.btn-add {
+  height: 38px;
+  padding: 0 1rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--vermillion);
+  color: var(--paper);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--display);
+  box-shadow: 0 2px 0 var(--vermillion-deep);
+  transition: background 90ms ease;
+}
+.btn-add:hover { background: var(--vermillion-deep); }
+.btn-add:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--vermillion-deep); }
 
 .hint { font-size: 0.74rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
 
