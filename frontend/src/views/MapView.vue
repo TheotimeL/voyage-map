@@ -142,6 +142,18 @@
       </template>
     </aside>
 
+    <InfoPanel
+      v-if="useV2 && mapData"
+      :tabs="v2Tabs"
+      :active="v2Active"
+      @update:active="(k) => v2Active = k"
+    >
+      <template #header><p class="mono">v2 dock — {{ mapData.title || 'Untitled voyage' }}</p></template>
+      <template #places><p>Places tab — empty for now</p></template>
+      <template #itinerary><p>Itinerary tab — empty for now</p></template>
+      <template #more><p>More menu — empty for now</p></template>
+    </InfoPanel>
+
     <div
       class="map-wrap"
       @dragover.prevent="onGpxDragOver"
@@ -242,6 +254,7 @@ import SunPanel from '@/components/SunPanel.vue'
 import SurvivalLayer from '@/components/SurvivalLayer.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import ElevationProfile from '@/components/ElevationProfile.vue'
+import InfoPanel from '@/components/InfoPanel.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries } from '@/lib/elevation.js'
 
@@ -255,6 +268,13 @@ const error = ref('')
 const titleDraft = ref('')
 const radiusDraft = ref(5000)
 const sidebarOpen = ref(true)
+const useV2 = ref(new URLSearchParams(window.location.search).get('ui') === 'v2')
+const v2Active = ref('places')
+const v2Tabs = [
+  { key: 'places', label: 'Places', icon: '📍' },
+  { key: 'itinerary', label: 'Itinerary', icon: '🗓' },
+  { key: 'more', label: 'More', icon: '⋯' },
+]
 const activeId = ref(null)
 const modal = ref(null)
 const detail = ref(null)
