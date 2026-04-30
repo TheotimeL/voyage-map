@@ -149,6 +149,26 @@
       @save="onSave"
       @close="modal = null"
     />
+
+    <Teleport to="body">
+      <div v-if="candidatesFor" class="scrim" @click.self="candidatesFor = null">
+        <div class="paper candidate-modal">
+          <p class="eyebrow">Multiple matches — pick one</p>
+          <h3 class="candidate-title">{{ candidatesFor.day.label }}</h3>
+          <ul class="candidate-list">
+            <li v-for="(r, i) in candidatesFor.results" :key="i">
+              <button class="candidate-btn" type="button" @click="pickCandidate(candidatesFor.day, r)">
+                <span class="cand-label">{{ r.label }}</span>
+                <span class="cand-coord mono">{{ r.lat.toFixed(3) }}, {{ r.lng.toFixed(3) }}</span>
+              </button>
+            </li>
+          </ul>
+          <div class="row">
+            <button type="button" class="btn btn-ghost" @click="candidatesFor = null">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -497,6 +517,8 @@ async function onDeleteDay(day) {
   } catch (e) { error.value = e.message }
 }
 
+const candidatesFor = ref(null)
+
 async function onGoDay(day) {
   if (!leaflet) return
   if (day.lat != null && day.lng != null) {
@@ -504,15 +526,27 @@ async function onGoDay(day) {
     return
   }
   if (!day.label) return
-  // Geocode the label, persist the result, then fly there.
   try {
     const results = await geocode(day.label)
-    if (!results.length) return
-    const top = results[0]
-    const updated = await api.patchItineraryDay(props.slug, day.id, { lat: top.lat, lng: top.lng })
+    if (!results.length) {
+      error.value = `No place found for "${day.label}".`
+      return
+    }
+    if (results.length === 1) {
+      await pickCandidate(day, results[0])
+      return
+    }
+    candidatesFor.value = { day, results: results.slice(0, 6) }
+  } catch (e) { error.value = e.message }
+}
+
+async function pickCandidate(day, choice) {
+  try {
+    const updated = await api.patchItineraryDay(props.slug, day.id, { lat: choice.lat, lng: choice.lng })
     const idx = mapData.value.itinerary.findIndex((d) => d.id === day.id)
     if (idx >= 0) mapData.value.itinerary.splice(idx, 1, updated)
-    leaflet.flyTo([top.lat, top.lng], 11, { duration: 0.6 })
+    leaflet.flyTo([choice.lat, choice.lng], 11, { duration: 0.6 })
+    candidatesFor.value = null
   } catch (e) { error.value = e.message }
 }
 
@@ -941,6 +975,41 @@ onBeforeUnmount(() => {
 }
 .today-banner:hover { background: var(--vermillion-deep); }
 .share { margin-top: auto; padding-top: 0.6rem; display: grid; gap: 0.4rem; }
+
+.candidate-modal {
+  width: min(560px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.55rem;
+  padding: 1.4rem 1.5rem;
+}
+.candidate-title { margin: 0; font-size: 1.4rem; }
+.candidate-list { list-style: none; margin: 0.2rem 0 0; padding: 0; display: grid; gap: 0.3rem; }
+.candidate-btn {
+  width: 100%;
+  text-align: left;
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  font: inherit;
+  color: var(--ink);
+  border-radius: 3px;
+}
+.candidate-btn:hover { background: var(--paper); border-color: var(--ink); color: var(--vermillion); }
+.cand-label {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cand-coord { font-size: 0.72rem; color: var(--ink-soft); }
+.row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.4rem; }
 
 @media (max-width: 720px) {
   .mapview { flex-direction: column-reverse; }
