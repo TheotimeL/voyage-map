@@ -132,6 +132,7 @@
       v-if="editingDay"
       :model-value="editingDay"
       @save="(payload) => onPatchDay(editingDay, payload)"
+      @locate-candidates="(c) => candidatesFor = c"
       @close="editingDay = null"
     />
 

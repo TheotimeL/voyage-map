@@ -53,6 +53,7 @@
       <input v-model="form.label" type="text" class="field tiny" placeholder="Where?" maxlength="200" />
       <button class="btn btn-tiny" type="submit">+ Add</button>
     </form>
+    <p class="hint mono">Set a date + label, drag its pin on the map to position it.</p>
   </section>
 </template>
 
@@ -67,6 +68,18 @@ const props = defineProps({
 const emit = defineEmits(['add', 'delete', 'go', 'edit'])
 
 const today = computed(() => todayISO())
+
+function nextDateAfter(iso) {
+  if (!iso) return today.value
+  const d = new Date(iso)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+const suggestedNewDate = computed(() => {
+  if (!props.days.length) return today.value
+  const last = [...props.days].sort((a, b) => a.date.localeCompare(b.date)).at(-1)
+  return nextDateAfter(last.date)
+})
 
 // Lazy weather lookup for days within the forecast window. Stored as a
 // reactive map of "id" → forecast object so the template re-renders as
@@ -84,6 +97,10 @@ async function refreshWeather(days) {
 watch(() => props.days, (next) => { refreshWeather(next || []) }, { immediate: true })
 
 const form = reactive({ date: today.value, label: '' })
+// Once `days` is populated, default the form to "next day after the last".
+watch(() => props.days, (next) => {
+  if (next && next.length) form.date = nextDateAfter([...next].sort((a, b) => a.date.localeCompare(b.date)).at(-1).date)
+}, { immediate: true })
 
 const firstISO = computed(() => '2020-01-01')
 
@@ -114,6 +131,7 @@ async function addDay() {
   if (!form.date) return
   emit('add', { date: form.date, label: form.label.trim() || null })
   form.label = ''
+  form.date = suggestedNewDate.value  // chain straight into next day
 }
 
 function del(d) {
