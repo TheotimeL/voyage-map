@@ -30,4 +30,8 @@ defineEmits(['click'])
 }
 .map-fab:hover { transform: scale(1.05); }
 .fab-glyph { font-size: 1.6rem; line-height: 1; font-weight: 600; }
+
+@media (max-width: 720px) {
+  .map-fab { bottom: 80px; }
+}
 </style>

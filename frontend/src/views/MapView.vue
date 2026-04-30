@@ -75,6 +75,7 @@
       <div v-if="todayBanner" class="today-banner" @click="onGoDay(todayBanner.day)">
         <span class="banner-tag mono">{{ todayBanner.tag }}</span>
         <span class="banner-text">{{ todayBanner.text }}</span>
+        <span v-if="todayBanner.sun" class="banner-sun mono">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
         <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
       </div>
 
@@ -152,6 +153,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import L from 'leaflet'
+import SunCalc from 'suncalc'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
 import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO } from '@/util.js'
@@ -574,6 +576,21 @@ async function importGpxFile(file) {
 
 // Itinerary -----------------------------------------------------------
 const today = computed(() => todayISO())
+
+function fmtHM(d) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+function attachSun(banner) {
+  if (!banner) return banner
+  if (window.matchMedia('(max-width: 720px)').matches) return banner
+  const lat = banner.day.lat ?? mapData.value?.center_lat
+  const lng = banner.day.lng ?? mapData.value?.center_lng
+  if (lat == null || lng == null) return banner
+  const t = SunCalc.getTimes(new Date(banner.day.date), lat, lng)
+  if (!t.sunrise || !t.sunset || isNaN(t.sunrise) || isNaN(t.sunset)) return banner
+  return { ...banner, sun: { rise: fmtHM(t.sunrise), set: fmtHM(t.sunset) } }
+}
+
 const todayBanner = computed(() => {
   const days = mapData.value?.itinerary || []
   if (!days.length) return null
@@ -582,24 +599,24 @@ const todayBanner = computed(() => {
   const todayDay = sorted.find((d) => d.date === t)
   if (todayDay) {
     const idx = sorted.indexOf(todayDay)
-    return {
+    return attachSun({
       tag: `Day ${idx + 1} / ${sorted.length}`,
       text: (todayDay.label || 'On the road').toUpperCase(),
       notes: todayDay.notes || null,
       day: todayDay,
-    }
+    })
   }
   const future = sorted.find((d) => d.date > t)
   if (future) {
     const ms = new Date(future.date) - new Date(t)
     const days = Math.floor(ms / 86400000)
     const tag = days >= 1 ? `T-${days}d` : `T-<1d`
-    return {
+    return attachSun({
       tag,
       text: `Next: ${(future.label || 'Untitled').toUpperCase()}`,
       notes: future.notes || null,
       day: future,
-    }
+    })
   }
   return null
 })
@@ -987,6 +1004,7 @@ onBeforeUnmount(() => {
   font-size: 1rem;
   letter-spacing: 0.04em;
 }
+.banner-sun { font-size: 0.78rem; color: var(--ink-soft); }
 .banner-notes {
   font-family: var(--body);
   font-size: 0.85rem;
