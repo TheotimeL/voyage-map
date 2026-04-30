@@ -1,149 +1,7 @@
 <template>
   <main class="mapview">
-    <aside class="sidebar paper" :class="{ open: sidebarOpen }">
-      <div class="side-head">
-        <router-link to="/" class="back">← Home</router-link>
-        <div class="head-actions">
-          <ThemeToggle />
-          <button class="btn-icon" @click="sidebarOpen = !sidebarOpen" :aria-label="sidebarOpen ? 'Collapse' : 'Expand'">
-            {{ sidebarOpen ? '⟨' : '⟩' }}
-          </button>
-        </div>
-      </div>
-
-      <div v-if="loading" class="loading">Charting…</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <template v-else-if="mapData">
-        <header class="voyage-head">
-          <h2 class="title">
-            <input
-              v-model="titleDraft"
-              class="title-input"
-              placeholder="Untitled voyage"
-              maxlength="120"
-              @blur="commitTitle"
-              @keydown.enter="$event.target.blur()"
-            />
-          </h2>
-          <p class="coord meta">
-            <span class="meta-icon">⌖</span>
-            <span>{{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}</span>
-          </p>
-          <div class="radius-row">
-            <span class="radius-label mono">Radius · {{ formatRadius(mapData.radius_m) }}</span>
-            <RadiusSlider v-model="radiusDraft" @update:modelValue="liveRadius" @change="commitRadius" />
-          </div>
-        </header>
-
-        <hr class="major-rule" />
-
-        <section class="sec">
-          <div class="sec-head">
-            <span class="sec-num mono">№ 01</span>
-            <h3 class="sec-title">Places</h3>
-            <span class="sec-count mono">
-              {{ visiblePoints.length }}<template v-if="hiddenCats.size > 0">/{{ mapData.points.length }}</template>
-            </span>
-            <button class="btn btn-tiny sec-action" @click="startNewPin">+ Drop</button>
-          </div>
-          <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
-          <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
-            ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
-          </button>
-          <p v-if="locateError" class="error sm">{{ locateError }}</p>
-          <CategoryFilters
-            :points="mapData.points"
-            :hidden="hiddenCats"
-            @toggle="toggleCat"
-            @reset="resetCats"
-          />
-          <PointList
-            :points="visiblePoints"
-            :active-id="activeId"
-            @select="onSelectPoint"
-          />
-        </section>
-
-        <section class="sec">
-          <div class="sec-head">
-            <span class="sec-num mono">№ 02</span>
-            <h3 class="sec-title">Itinerary</h3>
-          </div>
-          <Itinerary
-            :days="mapData.itinerary || []"
-            @add="onAddDay"
-            @add-bulk="onAddBulk"
-            @delete="onDeleteDay"
-            @go="onGoDay"
-          />
-        </section>
-
-        <section class="sec">
-          <div class="sec-head">
-            <span class="sec-num mono">№ 03</span>
-            <h3 class="sec-title">Routes</h3>
-            <span v-if="trailPoints.length" class="sec-count mono">{{ trailPoints.length }}</span>
-            <label class="btn btn-tiny gpx-pick sec-action">
-              + GPX
-              <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
-            </label>
-          </div>
-          <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
-          <ul v-if="trailPoints.length" class="track-list">
-            <li v-for="(t, i) in trailPoints" :key="t.id"
-                class="track-row"
-                :class="{ active: activeTrailPointId === t.id }"
-                @click="activeTrailPointId = activeTrailPointId === t.id ? null : t.id">
-              <span class="track-swatch" :style="{ background: t.color || trackColor(i) }"></span>
-              <span class="track-name">{{ t.title || `Track ${i + 1}` }}</span>
-              <button class="track-del" type="button" :title="`Delete ${t.title || 'track'}`" @click.stop="deleteTrailPoint(t.id)">×</button>
-            </li>
-          </ul>
-          <p v-else class="hint mono">Drop a .gpx anywhere on the map.</p>
-        </section>
-
-        <section class="sec">
-          <div class="sec-head">
-            <span class="sec-num mono">№ 04</span>
-            <h3 class="sec-title">Daylight</h3>
-          </div>
-          <SunPanel
-            :fallback-lat="mapData.center_lat"
-            :fallback-lng="mapData.center_lng"
-          />
-        </section>
-
-        <section class="sec">
-          <div class="sec-head">
-            <span class="sec-num mono">№ 05</span>
-            <h3 class="sec-title">Survival</h3>
-          </div>
-          <SurvivalLayer
-            :get-bounds="getMapBounds"
-            @render="renderSurvival"
-            @clear="clearSurvival"
-          />
-        </section>
-
-        <section class="sec">
-          <div class="sec-head">
-            <span class="sec-num mono">№ 06</span>
-            <h3 class="sec-title">Offline</h3>
-          </div>
-          <PrecacheButton :theme="theme" />
-        </section>
-
-        <footer class="side-foot">
-          <p class="foot-lbl mono">Share this map</p>
-          <button class="btn btn-ghost btn-share" @click="copyUrl">
-            {{ copied ? 'Copied ✓' : 'Copy link' }}
-          </button>
-        </footer>
-      </template>
-    </aside>
-
     <InfoPanel
-      v-if="useV2 && mapData"
+      v-if="mapData"
       :tabs="v2Tabs"
       :active="v2Active"
       @update:active="(k) => v2Active = k"
@@ -323,8 +181,6 @@ const loading = ref(true)
 const error = ref('')
 const titleDraft = ref('')
 const radiusDraft = ref(5000)
-const sidebarOpen = ref(true)
-const useV2 = ref(new URLSearchParams(window.location.search).get('ui') === 'v2')
 const v2Active = ref('places')
 const v2Tabs = [
   { key: 'places', label: 'Places', icon: '📍' },
@@ -1001,71 +857,8 @@ onBeforeUnmount(() => {
   height: 100%;
   background: var(--cream-deep);
 }
-.sidebar {
-  width: 380px;
-  max-width: 86vw;
-  height: 100%;
-  border-right: 1px solid var(--cream-edge);
-  border-top: none;
-  border-bottom: none;
-  border-left: none;
-  padding: 1.1rem 1.4rem 1.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.1rem;
-  overflow-y: auto;
-  transition: width 220ms ease, padding 220ms ease;
-  z-index: 2;
-  box-shadow: 4px 0 18px -8px rgba(40, 20, 0, 0.28);
-}
-.sidebar::-webkit-scrollbar { width: 6px; }
-.sidebar::-webkit-scrollbar-track { background: transparent; }
-.sidebar::-webkit-scrollbar-thumb { background: var(--cream-edge); border-radius: 3px; }
-.sidebar::-webkit-scrollbar-thumb:hover { background: var(--ink-faded); }
-.sidebar:not(.open) {
-  width: 56px;
-  padding: 1.2rem 0.5rem;
-  overflow: hidden;
-}
-.sidebar:not(.open) > *:not(.side-head) { display: none; }
-
-.side-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.head-actions { display: inline-flex; gap: 0.4rem; align-items: center; }
-.back {
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  border-bottom: none;
-}
-.back:hover { color: var(--vermillion); }
-.btn-icon {
-  background: transparent;
-  border: 1px solid var(--ink-faded);
-  border-radius: 2px;
-  width: 2rem; height: 2rem;
-  display: grid; place-items: center;
-  font-family: var(--display);
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-.btn-icon:hover { color: var(--vermillion); border-color: var(--vermillion); }
-
-.loading, .error {
-  padding: 2rem 0;
-  font-style: italic;
-  color: var(--ink-faded);
-  text-align: center;
-}
 .error { color: var(--vermillion-deep); }
 
-/* Voyage header --------------------------------------------------- */
-.voyage-head { display: grid; gap: 0.45rem; }
 .title { margin: 0; line-height: 0.94; }
 .title-input {
   font-family: var(--display);
@@ -1107,62 +900,6 @@ onBeforeUnmount(() => {
   color: var(--ink-faded);
 }
 
-/* Major rule between voyage and the section catalog */
-.major-rule {
-  border: none;
-  height: 3px;
-  background: var(--ink);
-  margin: 0.4rem 0 0.5rem;
-  box-shadow: 0 5px 0 -1px var(--ink);
-}
-
-/* Section system --------------------------------------------------- */
-.sec { display: grid; gap: 0.55rem; }
-.sec-head {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  align-items: baseline;
-  gap: 0.55rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--ink);
-  position: relative;
-}
-.sec-head::after {
-  content: '';
-  position: absolute;
-  left: 0; bottom: -1px;
-  width: 42px;
-  height: 2px;
-  background: var(--vermillion);
-}
-.sec-num {
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
-  color: var(--vermillion);
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.sec-title {
-  font-family: var(--display);
-  font-size: 1.05rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  margin: 0;
-  color: var(--ink);
-  font-weight: 400;
-}
-.sec-count {
-  font-size: 0.66rem;
-  letter-spacing: 0.18em;
-  color: var(--ink-faded);
-  text-transform: uppercase;
-  font-weight: 600;
-}
-.sec-action {
-  justify-self: end;
-  font-size: 0.7rem;
-  padding: 0.32rem 0.7rem;
-}
 
 .locate-link {
   background: transparent;
@@ -1225,46 +962,6 @@ onBeforeUnmount(() => {
 
 /* Routes section */
 .gpx-pick { cursor: pointer; }
-.track-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
-.track-row {
-  display: grid;
-  grid-template-columns: 14px 1fr auto;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid transparent;
-  border-radius: 3px;
-}
-.track-row:hover { background: var(--cream); border-color: var(--cream-edge); }
-.track-row.active { background: var(--cream); border-color: var(--vermillion); }
-.track-row { cursor: pointer; }
-.track-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1.5px solid var(--ink);
-  display: inline-block;
-}
-.track-name {
-  font-family: var(--body);
-  font-weight: 500;
-  font-size: 0.9rem;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.track-del {
-  background: transparent;
-  border: none;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-faded);
-  cursor: pointer;
-  padding: 0 0.3rem;
-  border-radius: 3px;
-}
-.track-del:hover { color: var(--vermillion); background: var(--cream); }
 .hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
 
 /* Today banner */
@@ -1311,31 +1008,6 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 .today-banner:hover { background: var(--vermillion-deep); }
-/* Footer ----------------------------------------------------------- */
-.side-foot {
-  margin-top: auto;
-  padding-top: 1rem;
-  display: grid;
-  gap: 0.45rem;
-  position: relative;
-}
-.side-foot::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: var(--ink);
-  box-shadow: 0 4px 0 -1px var(--ink-faded);
-}
-.foot-lbl {
-  font-size: 0.62rem;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-  color: var(--ink-faded);
-  font-weight: 700;
-  margin: 0.4rem 0 0;
-}
-.btn-share { width: 100%; }
 
 .candidate-modal {
   width: min(560px, 100%);
@@ -1372,9 +1044,4 @@ onBeforeUnmount(() => {
 .cand-coord { font-size: 0.72rem; color: var(--ink-soft); }
 .row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.4rem; }
 
-@media (max-width: 720px) {
-  .mapview { flex-direction: column-reverse; }
-  .sidebar { width: 100%; max-height: 50vh; border-right: none; border-top: 1px solid var(--cream-edge); }
-  .sidebar:not(.open) { max-height: 56px; }
-}
 </style>
