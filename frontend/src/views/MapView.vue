@@ -97,7 +97,13 @@
         <span class="locate-glyph">⌖</span>
       </button>
 
-      <MapFab glyph="+" title="Drop a pin" @click="startNewPin" />
+      <MapFab
+        :glyph="dropMode ? '×' : '+'"
+        :title="dropMode ? 'Click the map to drop — or × to cancel' : 'Drop a pin'"
+        :class="{ 'is-armed': dropMode }"
+        @click="startNewPin"
+      />
+      <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
 
       <Transition name="fade">
         <div v-if="gpxDragging" class="dropzone">
@@ -205,6 +211,10 @@ const activeId = ref(null)
 const modal = ref(null)
 const detail = ref(null)
 const editingDay = ref(null)
+const dropMode = ref(false)
+watch(dropMode, (on) => {
+  document.body.classList.toggle('drop-mode', on)
+})
 const copied = ref(false)
 const locating = ref(false)
 const locateError = ref('')
@@ -425,8 +435,14 @@ function initLeaflet() {
   // Initial view: fit to points + itinerary if any, otherwise centre on the map's saved center.
   fitToContent({ initial: true, fallbackCenter: center })
 
-  leaflet.on('click', () => {
-    // Empty-map click only dismisses an open detail card — no implicit pin drop.
+  leaflet.on('click', (e) => {
+    if (dropMode.value) {
+      // Place a new pin at the clicked location and exit drop mode.
+      modal.value = { lat: e.latlng.lat, lng: e.latlng.lng, title: '', comment: '', category: 'note' }
+      detail.value = null
+      dropMode.value = false
+      return
+    }
     if (detail.value) closeDetail()
   })
 
@@ -571,9 +587,10 @@ async function deletePoint(id) {
 }
 
 function startNewPin() {
-  const c = leaflet.getCenter()
-  modal.value = { lat: c.lat, lng: c.lng, title: '', comment: '', category: 'note' }
-  detail.value = null
+  // Toggle drop-mode: next click on the map places the pin where the user
+  // pointed instead of always at the current viewport centre.
+  dropMode.value = !dropMode.value
+  if (dropMode.value) detail.value = null
 }
 
 function onSelectPoint(p) {
@@ -1092,6 +1109,30 @@ onBeforeUnmount(() => {
 }
 .gpx-hint code { font-family: var(--mono); color: var(--vermillion); padding: 0 2px; }
 .gpx-hint .sep { color: var(--ink-faded); opacity: 0.6; }
+
+/* Drop-mode floating hint: pinned just above the FAB. */
+.drop-hint {
+  position: absolute;
+  right: 88px;
+  bottom: 28px;
+  padding: 0.55rem 0.85rem;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  z-index: 850;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+  animation: drop-hint-pop 200ms ease-out;
+}
+@keyframes drop-hint-pop {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+:deep(.map-fab.is-armed) {
+  background: var(--ink) !important;
+  box-shadow: 0 0 0 4px var(--vermillion), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
 .link-pick {
   cursor: pointer;
   color: var(--vermillion);

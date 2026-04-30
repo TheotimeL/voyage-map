@@ -330,6 +330,10 @@ input[type="range"]::-moz-range-thumb {
 body.sheet-expanded .map-fab,
 body.sheet-expanded .locate-me { display: none; }
 
+/* Drop-mode: crosshair cursor on the Leaflet map area. */
+body.drop-mode .leaflet-grab,
+body.drop-mode .leaflet-grab .leaflet-interactive { cursor: crosshair !important; }
+
 [data-theme="dark"] {
   --paper: #14171a;
   --cream: #1c2024;
