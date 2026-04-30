@@ -23,7 +23,7 @@
           <div class="iti-body">
             <button class="iti-label" type="button" @click="$emit('go', d)">
               {{ d.label || 'Untitled' }}
-              <span v-if="d.lat == null" class="locate-hint" title="Click to locate via search">⌖</span>
+              <span v-if="d.lat == null" class="locate-hint" title="No location yet — click to search">⌖</span>
             </button>
             <p v-if="forecastFor(d)" class="iti-wx mono">
               {{ glyphFor(forecastFor(d).code) }}
@@ -32,13 +32,17 @@
             </p>
             <p v-if="d.notes" class="iti-notes">{{ d.notes }}</p>
           </div>
-          <button class="iti-del" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
+          <div class="iti-actions">
+            <button class="iti-icon" type="button" :title="`Edit day ${i + 1}`" @click="$emit('edit', d)">✎</button>
+            <button class="iti-icon" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
+          </div>
         </li>
         <div
           v-if="i < days.length - 1 && legKm(d, days[i + 1]) != null"
           class="iti-leg mono"
+          :title="`Straight-line distance from ${d.label || 'this day'} to ${days[i + 1].label || 'the next day'} — actual driving will be longer.`"
         >
-          ↓ {{ legKm(d, days[i + 1]) }} km
+          ↓ ≈ {{ legKm(d, days[i + 1]) }} km
         </div>
       </template>
     </ol>
@@ -60,7 +64,7 @@ import { dailyForecast, glyphFor } from '@/lib/weather.js'
 const props = defineProps({
   days: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['add', 'delete', 'go'])
+const emit = defineEmits(['add', 'delete', 'go', 'edit'])
 
 const today = computed(() => todayISO())
 
@@ -219,19 +223,20 @@ function legKm(a, b) {
   text-overflow: ellipsis;
 }
 
-.iti-del {
+.iti-actions { display: inline-flex; gap: 0.1rem; }
+.iti-icon {
   background: transparent;
   border: none;
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   line-height: 1;
   color: var(--ink-faded);
   cursor: pointer;
-  padding: 0 0.3rem;
+  padding: 0.25rem 0.35rem;
   border-radius: 3px;
 }
-.iti-del:hover { color: var(--vermillion); background: var(--cream); }
-.iti-day.today .iti-del { color: rgba(255,255,255,0.7); }
-.iti-day.today .iti-del:hover { color: var(--paper); background: var(--vermillion-deep); }
+.iti-icon:hover { color: var(--vermillion); background: var(--cream); }
+.iti-day.today .iti-icon { color: rgba(255,255,255,0.7); }
+.iti-day.today .iti-icon:hover { color: var(--paper); background: var(--vermillion-deep); }
 
 .iti-leg {
   font-size: 0.66rem;

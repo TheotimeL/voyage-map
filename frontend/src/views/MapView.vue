@@ -46,6 +46,7 @@
           @add="onAddDay"
           @delete="onDeleteDay"
           @go="onGoDay"
+          @edit="(d) => editingDay = d"
         />
       </template>
       <template #more>
@@ -127,6 +128,13 @@
       @close="modal = null"
     />
 
+    <ItineraryDayModal
+      v-if="editingDay"
+      :model-value="editingDay"
+      @save="(payload) => onPatchDay(editingDay, payload)"
+      @close="editingDay = null"
+    />
+
     <Teleport to="body">
       <div v-if="candidatesFor" class="scrim" @click.self="candidatesFor = null">
         <div class="paper candidate-modal">
@@ -160,6 +168,7 @@ import { geocode } from '@/api.js'
 import Itinerary from '@/components/Itinerary.vue'
 import PointList from '@/components/PointList.vue'
 import PointFormModal from '@/components/PointFormModal.vue'
+import ItineraryDayModal from '@/components/ItineraryDayModal.vue'
 import PointDetailCard from '@/components/PointDetailCard.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
@@ -189,6 +198,7 @@ const tabs = [
 const activeId = ref(null)
 const modal = ref(null)
 const detail = ref(null)
+const editingDay = ref(null)
 const copied = ref(false)
 const locating = ref(false)
 const locateError = ref('')
@@ -660,6 +670,18 @@ async function onDeleteDay(day) {
   try {
     await api.deleteItineraryDay(props.slug, day.id)
     mapData.value.itinerary = mapData.value.itinerary.filter((d) => d.id !== day.id)
+  } catch (e) { error.value = e.message }
+}
+
+async function onPatchDay(day, payload) {
+  try {
+    const updated = await api.patchItineraryDay(props.slug, day.id, payload)
+    const idx = (mapData.value.itinerary || []).findIndex((d) => d.id === day.id)
+    if (idx >= 0) {
+      mapData.value.itinerary[idx] = { ...mapData.value.itinerary[idx], ...updated }
+      mapData.value.itinerary = [...mapData.value.itinerary].sort((a, b) => a.date.localeCompare(b.date))
+    }
+    editingDay.value = null
   } catch (e) { error.value = e.message }
 }
 
