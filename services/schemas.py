@@ -1,6 +1,6 @@
 """Pydantic request/response schemas."""
 
-from datetime import date, datetime
+from datetime import date as date_type, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -70,7 +70,7 @@ class TrackOut(BaseModel):
 
 
 class ItineraryDayIn(BaseModel):
-    date: date
+    date: date_type
     label: str | None = Field(default=None, max_length=200)
     lat: float | None = None
     lng: float | None = None
@@ -78,7 +78,7 @@ class ItineraryDayIn(BaseModel):
 
 
 class ItineraryDayPatch(BaseModel):
-    date: date | None = None
+    date: date_type | None = None
     label: str | None = Field(default=None, max_length=200)
     lat: float | None = None
     lng: float | None = None
@@ -89,7 +89,7 @@ class ItineraryDayOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    date: date
+    date: date_type
     label: str | None
     lat: float | None
     lng: float | None
