@@ -23,9 +23,6 @@ export const api = {
   patchPoint: (slug, id, payload) => request('PATCH', `/maps/${slug}/points/${id}`, payload),
   deletePoint: (slug, id) => request('DELETE', `/maps/${slug}/points/${id}`),
 
-  addTrack: (slug, payload) => request('POST', `/maps/${slug}/tracks`, payload),
-  deleteTrack: (slug, id) => request('DELETE', `/maps/${slug}/tracks/${id}`),
-
   addItineraryDay: (slug, payload) => request('POST', `/maps/${slug}/itinerary`, payload),
   addItineraryBulk: (slug, payload) => request('POST', `/maps/${slug}/itinerary/bulk`, payload),
   patchItineraryDay: (slug, id, payload) => request('PATCH', `/maps/${slug}/itinerary/${id}`, payload),

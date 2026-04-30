@@ -82,21 +82,21 @@
           <div class="sec-head">
             <span class="sec-num mono">№ 03</span>
             <h3 class="sec-title">Routes</h3>
-            <span v-if="mapData.tracks?.length" class="sec-count mono">{{ mapData.tracks.length }}</span>
+            <span v-if="trailPoints.length" class="sec-count mono">{{ trailPoints.length }}</span>
             <label class="btn btn-tiny gpx-pick sec-action">
               + GPX
               <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
             </label>
           </div>
           <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
-          <ul v-if="mapData.tracks && mapData.tracks.length" class="track-list">
-            <li v-for="(t, i) in mapData.tracks" :key="t.id"
+          <ul v-if="trailPoints.length" class="track-list">
+            <li v-for="(t, i) in trailPoints" :key="t.id"
                 class="track-row"
-                :class="{ active: activeTrackId === t.id }"
-                @click="activeTrackId = activeTrackId === t.id ? null : t.id">
+                :class="{ active: activeTrailPointId === t.id }"
+                @click="activeTrailPointId = activeTrailPointId === t.id ? null : t.id">
               <span class="track-swatch" :style="{ background: t.color || trackColor(i) }"></span>
-              <span class="track-name">{{ t.name || `Track ${i + 1}` }}</span>
-              <button class="track-del" type="button" :title="`Delete ${t.name || 'track'}`" @click.stop="deleteTrack(t.id)">×</button>
+              <span class="track-name">{{ t.title || `Track ${i + 1}` }}</span>
+              <button class="track-del" type="button" :title="`Delete ${t.title || 'track'}`" @click.stop="deleteTrailPoint(t.id)">×</button>
             </li>
           </ul>
           <p v-else class="hint mono">Drop a .gpx anywhere on the map.</p>
@@ -189,7 +189,7 @@
         :series="activeSeries"
         :name="activeTrackName"
         @hover="onElevHover"
-        @close="activeTrackId = null"
+        @close="activeTrailPointId = null"
       />
     </div>
 
@@ -262,17 +262,21 @@ const copied = ref(false)
 const locating = ref(false)
 const locateError = ref('')
 const hiddenCats = ref(new Set())
-const activeTrackId = ref(null)
+const activeTrailPointId = ref(null)
+const trailPoints = computed(() => {
+  if (!mapData.value) return []
+  return (mapData.value.points || []).filter((p) => p.gpx_data)
+})
 const activeSeries = computed(() => {
-  if (!activeTrackId.value || !mapData.value) return []
-  const t = mapData.value.tracks?.find((x) => x.id === activeTrackId.value)
+  if (!activeTrailPointId.value || !mapData.value) return []
+  const t = trailPoints.value.find((x) => x.id === activeTrailPointId.value)
   if (!t) return []
   const { coords, elevations } = parseGPX(t.gpx_data)
   return buildElevationSeries(coords, elevations)
 })
 const activeTrackName = computed(() => {
-  const t = mapData.value?.tracks?.find((x) => x.id === activeTrackId.value)
-  return t?.name || ''
+  const t = trailPoints.value.find((x) => x.id === activeTrailPointId.value)
+  return t?.title || ''
 })
 
 let hoverMarker = null
@@ -444,7 +448,7 @@ function initLeaflet() {
   })
 
   mapData.value.points.forEach(addPointMarker)
-  ;(mapData.value.tracks || []).forEach((t, i) => renderTrack(t, i))
+  trailPoints.value.forEach((p, i) => renderTrack(p, i))
   renderItinerary()
 }
 
@@ -619,14 +623,18 @@ async function importGpxFile(file) {
   try {
     const text = await file.text()
     const { coords, name } = parseGPX(text) // validate before POST
-    const idx = (mapData.value.tracks || []).length
-    const created = await api.addTrack(props.slug, {
-      name: name || file.name.replace(/\.gpx$/i, ''),
-      color: trackColor(idx),
+    const idx = trailPoints.value.length
+    const [lat, lng] = coords[0]
+    const created = await api.addPoint(props.slug, {
+      lat,
+      lng,
+      title: name || file.name.replace(/\.gpx$/i, ''),
+      category: 'trail',
       gpx_data: text,
+      color: trackColor(idx),
     })
-    if (!mapData.value.tracks) mapData.value.tracks = []
-    mapData.value.tracks.push(created)
+    if (!mapData.value.points) mapData.value.points = []
+    mapData.value.points.push(created)
     const line = renderTrack(created, idx)
     if (line && leaflet) leaflet.fitBounds(line.getBounds(), { padding: [40, 40] })
   } catch (e) {
@@ -634,10 +642,10 @@ async function importGpxFile(file) {
   }
 }
 
-async function deleteTrack(id) {
+async function deleteTrailPoint(id) {
   try {
-    await api.deleteTrack(props.slug, id)
-    mapData.value.tracks = (mapData.value.tracks || []).filter((t) => t.id !== id)
+    await api.deletePoint(props.slug, id)
+    mapData.value.points = (mapData.value.points || []).filter((p) => p.id !== id)
     removeTrackLine(id)
   } catch (e) {
     error.value = e.message
