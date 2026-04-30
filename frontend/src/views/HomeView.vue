@@ -32,6 +32,11 @@
         <li v-for="r in recents" :key="r.slug" class="recent-card">
           <router-link :to="{ name: 'map', params: { slug: r.slug } }" class="recent-link">
             <span class="recent-title">{{ r.title || 'Untitled voyage' }}</span>
+            <span v-if="r.stats" class="recent-stats mono">
+              <template v-if="r.stats.days">{{ r.stats.days }} day{{ r.stats.days === 1 ? '' : 's' }} · </template>
+              <template v-if="r.stats.trails">{{ r.stats.trails }} trail{{ r.stats.trails === 1 ? '' : 's' }} · </template>
+              {{ r.stats.points }} pin{{ r.stats.points === 1 ? '' : 's' }}
+            </span>
             <span class="recent-meta mono">{{ relTime(r.visitedAt) }} · /m/{{ r.slug }}</span>
           </router-link>
           <button class="recent-forget" type="button" :title="`Remove ${r.title || 'voyage'} from this list`" @click="forget(r.slug)">×</button>
@@ -299,6 +304,7 @@ h1 { margin: 0.5rem 0 1rem; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.recent-stats { font-size: 0.72rem; color: var(--ink-soft); letter-spacing: 0.04em; }
 .recent-meta { font-size: 0.7rem; color: var(--ink-faded); letter-spacing: 0.08em; }
 .recent-forget {
   background: transparent;

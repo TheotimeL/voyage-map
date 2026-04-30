@@ -12,10 +12,15 @@ function write(list) {
   try { localStorage.setItem(KEY, JSON.stringify(list)) } catch { /* private mode */ }
 }
 
-export function rememberMap(slug, title) {
+export function rememberMap(slug, title, stats = null) {
   if (!slug) return
   const list = read().filter((m) => m.slug !== slug)
-  list.unshift({ slug, title: title || null, visitedAt: new Date().toISOString() })
+  list.unshift({
+    slug,
+    title: title || null,
+    visitedAt: new Date().toISOString(),
+    stats: stats || null,
+  })
   write(list.slice(0, CAP))
 }
 

@@ -393,7 +393,11 @@ onMounted(async () => {
     const m = await api.getMap(props.slug)
     mapData.value = m
     titleDraft.value = m.title || ''
-    rememberMap(m.slug, m.title)
+    rememberMap(m.slug, m.title, {
+      points: (m.points || []).filter((p) => !p.gpx_data).length,
+      trails: (m.points || []).filter((p) => p.gpx_data).length,
+      days: (m.itinerary || []).length,
+    })
     loading.value = false
     await nextTick()
     initLeaflet()
