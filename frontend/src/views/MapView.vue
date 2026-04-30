@@ -387,10 +387,25 @@ function renderItinerary() {
   days.forEach((d, i) => {
     const m = L.marker([d.lat, d.lng], {
       icon: makeItineraryIcon(i + 1, d.date === today),
-      title: `${d.label || 'Day'} — ${d.date}`,
+      title: `${d.label || 'Day'} — drag to refine, click to focus`,
       zIndexOffset: 600,
+      draggable: true,
     }).addTo(leaflet)
     m.on('click', () => onGoDay(d))
+    m.on('dragend', async (e) => {
+      const ll = e.target.getLatLng()
+      try {
+        const updated = await api.patchItineraryDay(props.slug, d.id, { lat: ll.lat, lng: ll.lng })
+        const idx = (mapData.value.itinerary || []).findIndex((x) => x.id === d.id)
+        if (idx >= 0) {
+          mapData.value.itinerary[idx] = { ...mapData.value.itinerary[idx], ...updated }
+        }
+      } catch (err) {
+        // Snap back on failure.
+        m.setLatLng([d.lat, d.lng])
+        error.value = err?.message || 'Could not move that day.'
+      }
+    })
     itineraryMarkers.set(d.id, m)
     coords.push([d.lat, d.lng])
   })
