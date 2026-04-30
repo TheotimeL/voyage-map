@@ -21,3 +21,7 @@ frontend/.vite/
 
 .superpowers/
 .worktrees/
+
+# Dev symlinks (worktree only)
+.venv
+node_modules
