@@ -72,6 +72,10 @@
         />
 
         <hr class="rule" />
+        <p class="eyebrow">Offline cache</p>
+        <PrecacheButton :theme="'light'" />
+
+        <hr class="rule" />
 
         <div class="list-head">
           <p class="eyebrow">Routes</p>
@@ -186,6 +190,7 @@ import PointDetailCard from '@/components/PointDetailCard.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
 import RadiusSlider from '@/components/RadiusSlider.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
+import PrecacheButton from '@/components/PrecacheButton.vue'
 
 const props = defineProps({
   slug: { type: String, required: true },
