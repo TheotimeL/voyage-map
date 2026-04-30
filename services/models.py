@@ -1,8 +1,8 @@
 """SQLAlchemy models."""
 
-from datetime import datetime, timezone
+from datetime import date as date_type, datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from services.db import Base
@@ -33,6 +33,11 @@ class Map(Base):
         cascade="all, delete-orphan",
         order_by="Track.created_at",
     )
+    itinerary: Mapped[list["ItineraryDay"]] = relationship(
+        back_populates="map",
+        cascade="all, delete-orphan",
+        order_by="ItineraryDay.date",
+    )
 
 
 class Point(Base):
@@ -61,3 +66,17 @@ class Track(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     map: Mapped[Map] = relationship(back_populates="tracks")
+
+
+class ItineraryDay(Base):
+    __tablename__ = "itinerary_days"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    map_id: Mapped[int] = mapped_column(ForeignKey("maps.id", ondelete="CASCADE"), index=True)
+    date: Mapped[date_type] = mapped_column(Date, index=True)
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    map: Mapped[Map] = relationship(back_populates="itinerary")

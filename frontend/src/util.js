@@ -42,6 +42,94 @@ export function trackColor(index) {
   return TRACK_PALETTE[index % TRACK_PALETTE.length]
 }
 
+// French / English month parsing for pasted itineraries.
+const MONTH_LOOKUP = {
+  janvier: 0, jan: 0, january: 0,
+  'février': 1, fevrier: 1, fev: 1, 'fév': 1, feb: 1, february: 1,
+  mars: 2, mar: 2, march: 2,
+  avril: 3, avr: 3, april: 3, apr: 3,
+  mai: 4, may: 4,
+  juin: 5, june: 5, jun: 5,
+  juillet: 6, juil: 6, july: 6, jul: 6,
+  'août': 7, aout: 7, august: 7, aug: 7,
+  septembre: 8, sept: 8, september: 8, sep: 8,
+  octobre: 9, oct: 9, october: 9,
+  novembre: 10, nov: 10, november: 10,
+  'décembre': 11, decembre: 11, dec: 11, december: 11,
+}
+
+function _toIso(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+export function parseFlexibleDate(text, defaultYear) {
+  if (!text) return null
+  const s = String(text).trim().toLowerCase()
+  // ISO YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (m) return _toIso(+m[1], +m[2] - 1, +m[3])
+  // DD/MM/YYYY or DD-MM-YYYY
+  m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
+  if (m) {
+    const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]
+    return _toIso(y, +m[2] - 1, +m[1])
+  }
+  // "samedi 9 mai" / "9 mai" / "may 9" / "May 9, 2026"
+  m = s.match(/(\d{1,2})\s+([a-zàâéèêïô.]+)/i) || s.match(/([a-zàâéèêïô.]+)\s+(\d{1,2})/i)
+  if (!m) return null
+  const a = m[1], b = m[2]
+  const dayPart = /^\d/.test(a) ? a : b
+  const monPart = /^\d/.test(a) ? b : a
+  const day = parseInt(dayPart, 10)
+  const monthKey = monPart.replace(/\.$/, '')
+  const month = MONTH_LOOKUP[monthKey]
+  if (month == null) return null
+  const yearMatch = s.match(/(20\d{2})/)
+  const year = yearMatch ? +yearMatch[1] : (defaultYear || new Date().getFullYear())
+  return _toIso(year, month, day)
+}
+
+export function parseItineraryPaste(text, defaultYear) {
+  const lines = String(text).replace(/\r/g, '').trim().split('\n').filter((l) => l.trim())
+  if (!lines.length) return []
+  const sep = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ','
+  const rows = lines.map((l) => l.split(sep).map((c) => c.trim()))
+  const first = rows[0].map((c) => c.toLowerCase())
+  const hasHeader = first.some((c) => c.includes('date') || c.includes('lieu') || c.includes('jour'))
+  let dateIdx = 0, dodoIdx = 1, lieuIdx = 2, planIdx = 3, notesIdx = 4
+  if (hasHeader) {
+    const findIdx = (test) => first.findIndex(test)
+    dateIdx = findIdx((c) => c.includes('date') || c.startsWith('jour'))
+    dodoIdx = findIdx((c) => /dodo|hébergement|hebergement|hotel|sleep|stay/.test(c))
+    lieuIdx = findIdx((c) => c === 'lieu' || c.startsWith('lieu '))
+    planIdx = findIdx((c) => c.includes('prévu') || c.includes('prevu') || c.includes('planned'))
+    notesIdx = findIdx((c) => c.includes('note'))
+    rows.shift()
+  }
+  const out = []
+  for (const r of rows) {
+    const dateText = dateIdx >= 0 ? r[dateIdx] : ''
+    if (!dateText) continue
+    const date = parseFlexibleDate(dateText, defaultYear)
+    if (!date) continue
+    const dodo = dodoIdx >= 0 ? (r[dodoIdx] || '') : ''
+    const lieu = lieuIdx >= 0 ? (r[lieuIdx] || '') : ''
+    const plan = planIdx >= 0 ? (r[planIdx] || '') : ''
+    const label = (lieu || plan || dodo || '').trim()
+    const noteParts = []
+    if (dodo && dodo !== label) noteParts.push(dodo)
+    const notesCol = notesIdx >= 0 ? (r[notesIdx] || '') : ''
+    if (notesCol) noteParts.push(notesCol)
+    out.push({ date, label: label || null, notes: noteParts.join(' · ') || null })
+  }
+  return out
+}
+
+export function todayISO() {
+  const d = new Date()
+  return _toIso(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
 export function openInMaps(lat, lng, label) {
   const dest = `${lat},${lng}`
   const q = label ? `${dest}(${encodeURIComponent(label)})` : dest

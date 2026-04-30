@@ -63,6 +63,16 @@
 
         <hr class="rule" />
 
+        <Itinerary
+          :days="mapData.itinerary || []"
+          @add="onAddDay"
+          @add-bulk="onAddBulk"
+          @delete="onDeleteDay"
+          @go="onGoDay"
+        />
+
+        <hr class="rule" />
+
         <div class="list-head">
           <p class="eyebrow">Routes</p>
           <label class="btn btn-tiny gpx-pick">
@@ -95,6 +105,12 @@
       @dragleave="onGpxDragLeave"
       @drop.prevent="onGpxDrop"
     >
+      <div v-if="todayBanner" class="today-banner" @click="onGoDay(todayBanner.day)">
+        <span class="banner-tag mono">{{ todayBanner.tag }}</span>
+        <span class="banner-text">{{ todayBanner.text }}</span>
+        <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
+      </div>
+
       <div ref="mapEl" class="map"></div>
 
       <button
@@ -140,7 +156,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import L from 'leaflet'
 import { api } from '@/api.js'
-import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor } from '@/util.js'
+// Itinerary + geocode helpers imported below.
+import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO } from '@/util.js'
+import { geocode } from '@/api.js'
+import Itinerary from '@/components/Itinerary.vue'
 import PointList from '@/components/PointList.vue'
 import PointFormModal from '@/components/PointFormModal.vue'
 import PointDetailCard from '@/components/PointDetailCard.vue'
@@ -423,6 +442,78 @@ async function deleteTrack(id) {
   } catch (e) {
     error.value = e.message
   }
+}
+
+// Itinerary -----------------------------------------------------------
+const today = computed(() => todayISO())
+const todayBanner = computed(() => {
+  const days = mapData.value?.itinerary || []
+  if (!days.length) return null
+  const t = today.value
+  const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date))
+  const todayDay = sorted.find((d) => d.date === t)
+  if (todayDay) {
+    const idx = sorted.indexOf(todayDay)
+    return {
+      tag: `Day ${idx + 1} / ${sorted.length}`,
+      text: (todayDay.label || 'On the road').toUpperCase(),
+      notes: todayDay.notes || null,
+      day: todayDay,
+    }
+  }
+  const future = sorted.find((d) => d.date > t)
+  if (future) {
+    const days = Math.round((new Date(future.date) - new Date(t)) / 86400000)
+    return {
+      tag: `T-${days}`,
+      text: `Next: ${(future.label || 'Untitled').toUpperCase()}`,
+      notes: future.notes || null,
+      day: future,
+    }
+  }
+  return null
+})
+
+async function onAddDay(payload) {
+  try {
+    const day = await api.addItineraryDay(props.slug, payload)
+    if (!mapData.value.itinerary) mapData.value.itinerary = []
+    mapData.value.itinerary = [...mapData.value.itinerary, day].sort((a, b) => a.date.localeCompare(b.date))
+  } catch (e) { error.value = e.message }
+}
+
+async function onAddBulk(rows) {
+  try {
+    const created = await api.addItineraryBulk(props.slug, rows)
+    if (!mapData.value.itinerary) mapData.value.itinerary = []
+    mapData.value.itinerary = [...mapData.value.itinerary, ...created].sort((a, b) => a.date.localeCompare(b.date))
+  } catch (e) { error.value = e.message; throw e }
+}
+
+async function onDeleteDay(day) {
+  try {
+    await api.deleteItineraryDay(props.slug, day.id)
+    mapData.value.itinerary = mapData.value.itinerary.filter((d) => d.id !== day.id)
+  } catch (e) { error.value = e.message }
+}
+
+async function onGoDay(day) {
+  if (!leaflet) return
+  if (day.lat != null && day.lng != null) {
+    leaflet.flyTo([day.lat, day.lng], Math.max(leaflet.getZoom(), 11), { duration: 0.6 })
+    return
+  }
+  if (!day.label) return
+  // Geocode the label, persist the result, then fly there.
+  try {
+    const results = await geocode(day.label)
+    if (!results.length) return
+    const top = results[0]
+    const updated = await api.patchItineraryDay(props.slug, day.id, { lat: top.lat, lng: top.lng })
+    const idx = mapData.value.itinerary.findIndex((d) => d.id === day.id)
+    if (idx >= 0) mapData.value.itinerary.splice(idx, 1, updated)
+    leaflet.flyTo([top.lat, top.lng], 11, { duration: 0.6 })
+  } catch (e) { error.value = e.message }
 }
 
 async function onGpxFilePick(e) {
@@ -804,6 +895,51 @@ onBeforeUnmount(() => {
 }
 .track-del:hover { color: var(--vermillion); background: var(--cream); }
 .hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
+
+/* Today banner */
+.today-banner {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.5rem 0.9rem 0.5rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  max-width: 80%;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.banner-tag {
+  display: inline-block;
+  background: var(--vermillion);
+  color: var(--paper);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  padding: 0.18rem 0.55rem;
+  border-radius: 2px;
+  font-weight: 700;
+}
+.banner-text {
+  font-family: var(--display);
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+.banner-notes {
+  font-family: var(--body);
+  font-size: 0.85rem;
+  color: var(--cream);
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.today-banner:hover { background: var(--vermillion-deep); }
 .share { margin-top: auto; padding-top: 0.6rem; display: grid; gap: 0.4rem; }
 
 @media (max-width: 720px) {

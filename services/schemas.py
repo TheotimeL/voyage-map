@@ -1,6 +1,6 @@
 """Pydantic request/response schemas."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -69,6 +69,33 @@ class TrackOut(BaseModel):
     created_at: datetime
 
 
+class ItineraryDayIn(BaseModel):
+    date: date
+    label: str | None = Field(default=None, max_length=200)
+    lat: float | None = None
+    lng: float | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class ItineraryDayPatch(BaseModel):
+    date: date | None = None
+    label: str | None = Field(default=None, max_length=200)
+    lat: float | None = None
+    lng: float | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class ItineraryDayOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    date: date
+    label: str | None
+    lat: float | None
+    lng: float | None
+    notes: str | None
+
+
 class MapOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -81,3 +108,4 @@ class MapOut(BaseModel):
     created_at: datetime
     points: list[PointOut] = []
     tracks: list[TrackOut] = []
+    itinerary: list[ItineraryDayOut] = []

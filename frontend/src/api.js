@@ -25,6 +25,12 @@ export const api = {
 
   addTrack: (slug, payload) => request('POST', `/maps/${slug}/tracks`, payload),
   deleteTrack: (slug, id) => request('DELETE', `/maps/${slug}/tracks/${id}`),
+
+  addItineraryDay: (slug, payload) => request('POST', `/maps/${slug}/itinerary`, payload),
+  addItineraryBulk: (slug, payload) => request('POST', `/maps/${slug}/itinerary/bulk`, payload),
+  patchItineraryDay: (slug, id, payload) => request('PATCH', `/maps/${slug}/itinerary/${id}`, payload),
+  deleteItineraryDay: (slug, id) => request('DELETE', `/maps/${slug}/itinerary/${id}`),
+  clearItinerary: (slug) => request('DELETE', `/maps/${slug}/itinerary`),
 }
 
 // Nominatim geocoding (free OSM service). Throttle to be polite.
