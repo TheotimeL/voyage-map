@@ -19,7 +19,7 @@
 
     <section class="more-block">
       <div class="more-row">
-        <h4 class="more-title">Survival POIs</h4>
+        <h4 class="more-title">Water · WC · Trash</h4>
         <SurvivalLayer :get-bounds="getBounds" @render="(v) => emit('render-survival', v)" @clear="emit('clear-survival')" />
       </div>
     </section>

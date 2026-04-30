@@ -5,9 +5,10 @@
       :class="{ on: enabled }"
       type="button"
       :disabled="loading"
+      :title="enabled ? 'Hide nearby water / toilets / trash / dump stations' : 'Show nearby water / toilets / trash / dump stations'"
       @click="toggle"
     >
-      {{ loading ? 'Searching…' : enabled ? '✓ Survival' : 'Survival' }}
+      {{ loading ? 'Searching…' : enabled ? '✓ Showing' : 'Find nearby' }}
     </button>
     <p v-if="error" class="error sm">{{ error }}</p>
     <p v-else-if="enabled && !loading" class="hint mono">
