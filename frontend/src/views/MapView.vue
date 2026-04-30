@@ -76,6 +76,12 @@
         <PrecacheButton :theme="'light'" />
 
         <hr class="rule" />
+        <SunPanel
+          :fallback-lat="mapData.center_lat"
+          :fallback-lng="mapData.center_lng"
+        />
+
+        <hr class="rule" />
 
         <div class="list-head">
           <p class="eyebrow">Routes</p>
@@ -191,6 +197,7 @@ import GeocoderSearch from '@/components/GeocoderSearch.vue'
 import RadiusSlider from '@/components/RadiusSlider.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
 import PrecacheButton from '@/components/PrecacheButton.vue'
+import SunPanel from '@/components/SunPanel.vue'
 
 const props = defineProps({
   slug: { type: String, required: true },
