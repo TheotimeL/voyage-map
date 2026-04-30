@@ -41,12 +41,22 @@
         <hr class="rule" />
 
         <div class="list-head">
-          <p class="eyebrow">{{ mapData.points.length }} {{ mapData.points.length === 1 ? 'mark' : 'marks' }}</p>
+          <p class="eyebrow">
+            {{ visiblePoints.length }}{{ hiddenCats.size > 0 ? ` / ${mapData.points.length}` : '' }}
+            {{ visiblePoints.length === 1 ? 'mark' : 'marks' }}
+          </p>
           <button class="btn btn-tiny" @click="startNewPin">+ Drop here</button>
         </div>
 
-        <PointList
+        <CategoryFilters
           :points="mapData.points"
+          :hidden="hiddenCats"
+          @toggle="toggleCat"
+          @reset="resetCats"
+        />
+
+        <PointList
+          :points="visiblePoints"
           :active-id="activeId"
           @select="onSelectPoint"
         />
@@ -94,7 +104,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import L from 'leaflet'
 import { api } from '@/api.js'
 import { CATEGORIES, formatLat, formatLng, getMyLocation } from '@/util.js'
@@ -103,6 +113,7 @@ import PointFormModal from '@/components/PointFormModal.vue'
 import PointDetailCard from '@/components/PointDetailCard.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
 import RadiusSlider from '@/components/RadiusSlider.vue'
+import CategoryFilters from '@/components/CategoryFilters.vue'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -120,6 +131,31 @@ const detail = ref(null)
 const copied = ref(false)
 const locating = ref(false)
 const locateError = ref('')
+const hiddenCats = ref(new Set())
+
+const visiblePoints = computed(() => {
+  if (!mapData.value) return []
+  if (hiddenCats.value.size === 0) return mapData.value.points
+  return mapData.value.points.filter((p) => !hiddenCats.value.has(p.category))
+})
+
+watch(visiblePoints, (next) => {
+  // Sync map markers: hide markers whose category is filtered out.
+  const allowed = new Set(next.map((p) => p.id))
+  for (const [id, marker] of pointMarkers.entries()) {
+    const onMap = leaflet?.hasLayer(marker)
+    if (allowed.has(id) && !onMap) marker.addTo(leaflet)
+    else if (!allowed.has(id) && onMap) leaflet.removeLayer(marker)
+  }
+})
+
+function toggleCat(key) {
+  const s = new Set(hiddenCats.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  hiddenCats.value = s
+}
+function resetCats() { hiddenCats.value = new Set() }
 
 const mapEl = ref(null)
 let leaflet = null

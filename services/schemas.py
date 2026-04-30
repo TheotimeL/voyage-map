@@ -5,7 +5,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CATEGORIES = Literal["food", "sight", "stay", "drink", "view", "transit", "shop", "note"]
+CATEGORIES = Literal[
+    "food", "sight", "stay", "drink", "view", "transit", "shop", "note",
+    "camp", "trail",
+]
 
 
 class PointIn(BaseModel):

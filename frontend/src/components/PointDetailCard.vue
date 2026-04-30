@@ -17,6 +17,8 @@
       {{ formatLat(point.lat) }} · {{ formatLng(point.lng) }}
     </p>
 
+    <button class="btn directions" type="button" @click="onDirections">Directions →</button>
+
     <div class="actions">
       <button class="btn btn-ghost" @click="$emit('edit')">Edit</button>
       <button class="btn btn-ghost danger" @click="$emit('delete')">Delete</button>
@@ -26,16 +28,21 @@
 
 <script setup>
 import { computed } from 'vue'
-import { CATEGORIES, formatLat, formatLng } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, openInMaps } from '@/util.js'
 
 const props = defineProps({
   point: { type: Object, required: true },
 })
 defineEmits(['edit', 'delete', 'close'])
 
-const cat = computed(() => CATEGORIES.find((c) => c.key === props.point.category) || CATEGORIES[7])
+const fallback = CATEGORIES[CATEGORIES.length - 1]
+const cat = computed(() => CATEGORIES.find((c) => c.key === props.point.category) || fallback)
 const emoji = computed(() => cat.value.emoji)
 const catLabel = computed(() => cat.value.label)
+
+function onDirections() {
+  openInMaps(props.point.lat, props.point.lng, props.point.title || cat.value.label)
+}
 </script>
 
 <style scoped>
@@ -95,11 +102,15 @@ const catLabel = computed(() => cat.value.label)
 
 .meta { margin: 0; font-size: 0.78rem; }
 
+.directions {
+  width: 100%;
+  margin-top: 0.2rem;
+}
 .actions {
   display: flex;
   gap: 0.4rem;
   justify-content: flex-end;
-  margin-top: 0.3rem;
+  margin-top: 0.2rem;
 }
 .danger { color: var(--vermillion); border-color: var(--vermillion); }
 .danger:hover { background: var(--vermillion); color: var(--paper); border-color: var(--vermillion); }
