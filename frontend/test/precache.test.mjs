@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { tilesForBbox, lonLatToTile } from '../src/lib/precache.js'
+import { tilesForBbox, lonLatToTile, preloadTiles } from '../src/lib/precache.js'
 
 // Vegas at zoom 10
 const t = lonLatToTile(36.17, -115.14, 10)
@@ -15,3 +15,16 @@ const big = tilesForBbox({ minLat: 33, maxLat: 39.5, minLng: -121, maxLng: -111.
 assert.ok(big.length > list.length)
 
 console.log('precache: OK')
+
+// stub fetch
+let calls = 0
+globalThis.fetch = async () => { calls++; return { ok: true } }
+const r = await preloadTiles(
+  [{ z: 6, x: 1, y: 1 }, { z: 6, x: 2, y: 1 }],
+  'light',
+  { concurrency: 2 },
+)
+assert.equal(r.done, 2)
+assert.equal(r.failed, 0)
+assert.equal(calls, 2)
+console.log('preloadTiles: OK')
