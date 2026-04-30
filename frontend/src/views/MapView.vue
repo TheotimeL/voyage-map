@@ -14,112 +14,131 @@
       <div v-if="loading" class="loading">Charting…</div>
       <div v-else-if="error" class="error">{{ error }}</div>
       <template v-else-if="mapData">
-        <p class="eyebrow">Voyage</p>
-        <h2 class="title">
-          <input
-            v-model="titleDraft"
-            class="title-input"
-            placeholder="Untitled voyage"
-            maxlength="120"
-            @blur="commitTitle"
-            @keydown.enter="$event.target.blur()"
-          />
-        </h2>
-        <p class="coord meta">
-          centred {{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}
-          <br />radius {{ formatRadius(mapData.radius_m) }}
-        </p>
-
-        <RadiusSlider v-model="radiusDraft" @update:modelValue="liveRadius" @change="commitRadius" />
-
-        <hr class="rule" />
-
-        <p class="eyebrow tight">Add a place</p>
-        <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
-        <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
-          ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
-        </button>
-        <p v-if="locateError" class="error sm">{{ locateError }}</p>
-
-        <hr class="rule" />
-
-        <div class="list-head">
-          <p class="eyebrow">
-            {{ visiblePoints.length }}{{ hiddenCats.size > 0 ? ` / ${mapData.points.length}` : '' }}
-            {{ visiblePoints.length === 1 ? 'mark' : 'marks' }}
+        <header class="voyage-head">
+          <h2 class="title">
+            <input
+              v-model="titleDraft"
+              class="title-input"
+              placeholder="Untitled voyage"
+              maxlength="120"
+              @blur="commitTitle"
+              @keydown.enter="$event.target.blur()"
+            />
+          </h2>
+          <p class="coord meta">
+            <span class="meta-icon">⌖</span>
+            <span>{{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}</span>
           </p>
-          <button class="btn btn-tiny" @click="startNewPin">+ Drop here</button>
-        </div>
+          <div class="radius-row">
+            <span class="radius-label mono">Radius · {{ formatRadius(mapData.radius_m) }}</span>
+            <RadiusSlider v-model="radiusDraft" @update:modelValue="liveRadius" @change="commitRadius" />
+          </div>
+        </header>
 
-        <CategoryFilters
-          :points="mapData.points"
-          :hidden="hiddenCats"
-          @toggle="toggleCat"
-          @reset="resetCats"
-        />
+        <hr class="major-rule" />
 
-        <PointList
-          :points="visiblePoints"
-          :active-id="activeId"
-          @select="onSelectPoint"
-        />
+        <section class="sec">
+          <div class="sec-head">
+            <span class="sec-num mono">№ 01</span>
+            <h3 class="sec-title">Places</h3>
+            <span class="sec-count mono">
+              {{ visiblePoints.length }}<template v-if="hiddenCats.size > 0">/{{ mapData.points.length }}</template>
+            </span>
+            <button class="btn btn-tiny sec-action" @click="startNewPin">+ Drop</button>
+          </div>
+          <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
+          <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
+            ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
+          </button>
+          <p v-if="locateError" class="error sm">{{ locateError }}</p>
+          <CategoryFilters
+            :points="mapData.points"
+            :hidden="hiddenCats"
+            @toggle="toggleCat"
+            @reset="resetCats"
+          />
+          <PointList
+            :points="visiblePoints"
+            :active-id="activeId"
+            @select="onSelectPoint"
+          />
+        </section>
 
-        <hr class="rule" />
+        <section class="sec">
+          <div class="sec-head">
+            <span class="sec-num mono">№ 02</span>
+            <h3 class="sec-title">Itinerary</h3>
+          </div>
+          <Itinerary
+            :days="mapData.itinerary || []"
+            @add="onAddDay"
+            @add-bulk="onAddBulk"
+            @delete="onDeleteDay"
+            @go="onGoDay"
+          />
+        </section>
 
-        <Itinerary
-          :days="mapData.itinerary || []"
-          @add="onAddDay"
-          @add-bulk="onAddBulk"
-          @delete="onDeleteDay"
-          @go="onGoDay"
-        />
+        <section class="sec">
+          <div class="sec-head">
+            <span class="sec-num mono">№ 03</span>
+            <h3 class="sec-title">Routes</h3>
+            <span v-if="mapData.tracks?.length" class="sec-count mono">{{ mapData.tracks.length }}</span>
+            <label class="btn btn-tiny gpx-pick sec-action">
+              + GPX
+              <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
+            </label>
+          </div>
+          <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
+          <ul v-if="mapData.tracks && mapData.tracks.length" class="track-list">
+            <li v-for="(t, i) in mapData.tracks" :key="t.id"
+                class="track-row"
+                :class="{ active: activeTrackId === t.id }"
+                @click="activeTrackId = activeTrackId === t.id ? null : t.id">
+              <span class="track-swatch" :style="{ background: t.color || trackColor(i) }"></span>
+              <span class="track-name">{{ t.name || `Track ${i + 1}` }}</span>
+              <button class="track-del" type="button" :title="`Delete ${t.name || 'track'}`" @click.stop="deleteTrack(t.id)">×</button>
+            </li>
+          </ul>
+          <p v-else class="hint mono">Drop a .gpx anywhere on the map.</p>
+        </section>
 
-        <hr class="rule" />
-        <p class="eyebrow">Offline cache</p>
-        <PrecacheButton :theme="theme" />
+        <section class="sec">
+          <div class="sec-head">
+            <span class="sec-num mono">№ 04</span>
+            <h3 class="sec-title">Daylight</h3>
+          </div>
+          <SunPanel
+            :fallback-lat="mapData.center_lat"
+            :fallback-lng="mapData.center_lng"
+          />
+        </section>
 
-        <hr class="rule" />
-        <SunPanel
-          :fallback-lat="mapData.center_lat"
-          :fallback-lng="mapData.center_lng"
-        />
+        <section class="sec">
+          <div class="sec-head">
+            <span class="sec-num mono">№ 05</span>
+            <h3 class="sec-title">Survival</h3>
+          </div>
+          <SurvivalLayer
+            :get-bounds="getMapBounds"
+            @render="renderSurvival"
+            @clear="clearSurvival"
+          />
+        </section>
 
-        <hr class="rule" />
-        <p class="eyebrow">Survival</p>
-        <SurvivalLayer
-          :get-bounds="getMapBounds"
-          @render="renderSurvival"
-          @clear="clearSurvival"
-        />
+        <section class="sec">
+          <div class="sec-head">
+            <span class="sec-num mono">№ 06</span>
+            <h3 class="sec-title">Offline</h3>
+          </div>
+          <PrecacheButton :theme="theme" />
+        </section>
 
-        <hr class="rule" />
-
-        <div class="list-head">
-          <p class="eyebrow">Routes</p>
-          <label class="btn btn-tiny gpx-pick">
-            + GPX
-            <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
-          </label>
-        </div>
-        <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
-        <ul v-if="mapData.tracks && mapData.tracks.length" class="track-list">
-          <li v-for="(t, i) in mapData.tracks" :key="t.id"
-              class="track-row"
-              :class="{ active: activeTrackId === t.id }"
-              @click="activeTrackId = activeTrackId === t.id ? null : t.id">
-            <span class="track-swatch" :style="{ background: t.color || trackColor(i) }"></span>
-            <span class="track-name">{{ t.name || `Track ${i + 1}` }}</span>
-            <button class="track-del" type="button" :title="`Delete ${t.name || 'track'}`" @click.stop="deleteTrack(t.id)">×</button>
-          </li>
-        </ul>
-        <p v-else class="hint mono">Drop a .gpx anywhere on the map.</p>
-
-        <div class="share">
-          <p class="lbl">Share this map</p>
-          <button class="btn btn-ghost" @click="copyUrl">
+        <footer class="side-foot">
+          <p class="foot-lbl mono">Share this map</p>
+          <button class="btn btn-ghost btn-share" @click="copyUrl">
             {{ copied ? 'Copied ✓' : 'Copy link' }}
           </button>
-        </div>
+        </footer>
       </template>
     </aside>
 
@@ -899,22 +918,26 @@ onBeforeUnmount(() => {
   background: var(--cream-deep);
 }
 .sidebar {
-  width: 360px;
+  width: 380px;
   max-width: 86vw;
   height: 100%;
   border-right: 1px solid var(--cream-edge);
   border-top: none;
   border-bottom: none;
   border-left: none;
-  padding: 1.2rem 1.3rem 1.4rem;
+  padding: 1.1rem 1.4rem 1.6rem;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 1.1rem;
   overflow-y: auto;
   transition: width 220ms ease, padding 220ms ease;
   z-index: 2;
   box-shadow: 4px 0 18px -8px rgba(40, 20, 0, 0.28);
 }
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--cream-edge); border-radius: 3px; }
+.sidebar::-webkit-scrollbar-thumb:hover { background: var(--ink-faded); }
 .sidebar:not(.open) {
   width: 56px;
   padding: 1.2rem 0.5rem;
@@ -957,53 +980,117 @@ onBeforeUnmount(() => {
 }
 .error { color: var(--vermillion-deep); }
 
-.title { margin: 0; }
+/* Voyage header --------------------------------------------------- */
+.voyage-head { display: grid; gap: 0.45rem; }
+.title { margin: 0; line-height: 0.94; }
 .title-input {
   font-family: var(--display);
-  font-size: 1.7rem;
+  font-size: 2.15rem;
+  letter-spacing: 0.005em;
   color: var(--ink);
   background: transparent;
   border: none;
   border-bottom: 1px dotted transparent;
   width: 100%;
-  padding: 0.05em 0;
+  padding: 0;
   outline: none;
+  text-transform: uppercase;
 }
 .title-input:focus, .title-input:hover { border-bottom-color: var(--ink-faded); }
-.title-input::placeholder { color: var(--ink-faded); font-style: italic; }
+.title-input::placeholder { color: var(--ink-faded); font-style: italic; text-transform: none; }
 
-.meta { margin: 0.2rem 0 0.4rem; font-size: 0.85rem; line-height: 1.55; }
-.rule {
-  border: none;
-  border-top: 1px solid var(--cream-edge);
-  margin: 0.4rem 0 0.2rem;
-}
-.list-head {
+.meta {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.lbl {
+  align-items: baseline;
+  gap: 0.45rem;
   font-family: var(--mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.22em;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  margin: 0.15rem 0 0;
+}
+.meta-icon { color: var(--vermillion); font-weight: 700; }
+
+.radius-row {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+.radius-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-faded);
 }
-.eyebrow.tight { margin: 0; }
+
+/* Major rule between voyage and the section catalog */
+.major-rule {
+  border: none;
+  height: 3px;
+  background: var(--ink);
+  margin: 0.4rem 0 0.5rem;
+  box-shadow: 0 5px 0 -1px var(--ink);
+}
+
+/* Section system --------------------------------------------------- */
+.sec { display: grid; gap: 0.55rem; }
+.sec-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--ink);
+  position: relative;
+}
+.sec-head::after {
+  content: '';
+  position: absolute;
+  left: 0; bottom: -1px;
+  width: 42px;
+  height: 2px;
+  background: var(--vermillion);
+}
+.sec-num {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  color: var(--vermillion);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.sec-title {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--ink);
+  font-weight: 400;
+}
+.sec-count {
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  color: var(--ink-faded);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.sec-action {
+  justify-self: end;
+  font-size: 0.7rem;
+  padding: 0.32rem 0.7rem;
+}
 
 .locate-link {
   background: transparent;
   border: none;
   padding: 0.1rem 0;
   font-family: var(--mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--vermillion);
   cursor: pointer;
   justify-self: start;
-  margin-top: -0.2rem;
 }
 .locate-link:hover { color: var(--vermillion-deep); }
 .locate-link:disabled { color: var(--ink-faded); cursor: wait; }
@@ -1140,7 +1227,31 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 .today-banner:hover { background: var(--vermillion-deep); }
-.share { margin-top: auto; padding-top: 0.6rem; display: grid; gap: 0.4rem; }
+/* Footer ----------------------------------------------------------- */
+.side-foot {
+  margin-top: auto;
+  padding-top: 1rem;
+  display: grid;
+  gap: 0.45rem;
+  position: relative;
+}
+.side-foot::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: var(--ink);
+  box-shadow: 0 4px 0 -1px var(--ink-faded);
+}
+.foot-lbl {
+  font-size: 0.62rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  font-weight: 700;
+  margin: 0.4rem 0 0;
+}
+.btn-share { width: 100%; }
 
 .candidate-modal {
   width: min(560px, 100%);

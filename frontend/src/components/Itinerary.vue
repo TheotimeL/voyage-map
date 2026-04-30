@@ -1,11 +1,8 @@
 <template>
   <section class="iti">
     <div class="iti-head">
-      <p class="eyebrow">Itinerary</p>
-      <div class="iti-actions">
-        <button v-if="todayDay" class="btn btn-tiny" type="button" @click="goToday">Today →</button>
-        <button class="btn btn-tiny btn-ghost" type="button" @click="showPaste = true">Paste</button>
-      </div>
+      <button v-if="todayDay" class="btn btn-tiny" type="button" @click="goToday">Today →</button>
+      <button class="btn btn-tiny btn-ghost" type="button" @click="showPaste = true">Paste</button>
     </div>
 
     <p v-if="days.length" class="iti-meta mono">
@@ -159,11 +156,18 @@ async function doPaste() {
 .iti { display: grid; gap: 0.45rem; }
 .iti-head {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
+  gap: 0.35rem;
+  margin-top: -0.1rem;
 }
-.iti-actions { display: inline-flex; gap: 0.3rem; }
-.iti-meta { margin: 0; color: var(--ink-faded); font-size: 0.72rem; letter-spacing: 0.06em; }
+.iti-meta {
+  margin: 0;
+  color: var(--ink-faded);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
 
 .iti-list {
   list-style: none;

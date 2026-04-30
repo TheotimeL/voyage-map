@@ -65,11 +65,14 @@ async function run() {
 </script>
 
 <style scoped>
-.precache { display: grid; gap: 0.3rem; }
+.precache { display: grid; gap: 0.35rem; justify-items: start; }
+.btn { font-family: var(--display); }
 .precache-bar {
   position: relative;
-  height: 4px;
-  background: var(--cream-edge);
+  height: 18px;
+  width: 100%;
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -77,10 +80,13 @@ async function run() {
 .bar-text {
   position: absolute;
   inset: 0;
-  font-size: 0.65rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
   display: grid;
   place-items: center;
-  color: var(--ink-soft);
+  color: var(--ink);
+  font-weight: 700;
+  mix-blend-mode: multiply;
 }
 .error.sm { font-size: 0.78rem; color: var(--vermillion-deep); margin: 0; }
 </style>

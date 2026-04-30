@@ -49,8 +49,8 @@ async function toggle() {
 </script>
 
 <style scoped>
-.survival { display: grid; gap: 0.3rem; }
-.btn.on { background: var(--vermillion); color: var(--paper); }
-.hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0; }
+.survival { display: grid; gap: 0.35rem; justify-items: start; }
+.btn.on { background: var(--ink); color: var(--paper); box-shadow: 0 2px 0 #000; }
+.hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0; letter-spacing: 0.06em; }
 .error.sm { font-size: 0.78rem; color: var(--vermillion-deep); margin: 0; }
 </style>

@@ -1,6 +1,5 @@
 <template>
   <section v-if="info" class="sun-panel">
-    <p class="eyebrow">Daylight</p>
     <ul class="sun-rows">
       <li>
         <span class="lbl">Sunset</span>
@@ -85,16 +84,18 @@ onBeforeUnmount(() => { clearInterval(tickHandle.value) })
 .val { font-family: var(--display); font-size: 0.95rem; }
 .cd { color: var(--ink-soft); }
 .cd.urgent { color: var(--vermillion); font-weight: 700; }
-.hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0; }
+.hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0; letter-spacing: 0.06em; }
 .locate-link {
   background: transparent;
   border: none;
   font-family: var(--mono);
   font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--vermillion);
   cursor: pointer;
   justify-self: start;
-  padding: 0;
+  padding: 0.1rem 0;
 }
+.locate-link:hover { color: var(--vermillion-deep); }
 </style>
