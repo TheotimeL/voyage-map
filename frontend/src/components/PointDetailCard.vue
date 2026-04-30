@@ -10,6 +10,11 @@
       </div>
     </div>
 
+    <p v-if="trailStats" class="trail-line mono" :style="point.color ? { '--swatch': point.color } : null">
+      <span class="trail-swatch" />
+      <span>{{ trailStats.km }} km · D+ {{ trailStats.gain }} m</span>
+    </p>
+
     <p v-if="point.comment" class="comment">{{ point.comment }}</p>
     <p v-else class="comment muted"><em>No notes yet.</em></p>
 
@@ -28,7 +33,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { CATEGORIES, formatLat, formatLng, openInMaps } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, openInMaps, parseGPX } from '@/util.js'
+import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 
 const props = defineProps({
   point: { type: Object, required: true },
@@ -39,6 +45,19 @@ const fallback = CATEGORIES[CATEGORIES.length - 1]
 const cat = computed(() => CATEGORIES.find((c) => c.key === props.point.category) || fallback)
 const emoji = computed(() => cat.value.emoji)
 const catLabel = computed(() => cat.value.label)
+
+const trailStats = computed(() => {
+  if (!props.point.gpx_data) return null
+  try {
+    const { coords, elevations } = parseGPX(props.point.gpx_data)
+    const series = buildElevationSeries(coords, elevations)
+    if (!series.length) return null
+    return {
+      km: (series[series.length - 1].dist / 1000).toFixed(1),
+      gain: Math.round(elevationStats(series).gain),
+    }
+  } catch { return null }
+})
 
 function onDirections() {
   openInMaps(props.point.lat, props.point.lng, props.point.title || cat.value.label)
@@ -101,6 +120,23 @@ function onDirections() {
 .comment.muted { color: var(--ink-faded); }
 
 .meta { margin: 0; font-size: 0.78rem; }
+
+.trail-line {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--swatch, var(--ink-faded));
+}
+.trail-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  background: var(--swatch, var(--ink-faded));
+  border-radius: 2px;
+}
 
 .directions {
   width: 100%;
