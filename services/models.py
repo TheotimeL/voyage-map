@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from services.db import Base
@@ -28,6 +28,11 @@ class Map(Base):
         cascade="all, delete-orphan",
         order_by="Point.created_at",
     )
+    tracks: Mapped[list["Track"]] = relationship(
+        back_populates="map",
+        cascade="all, delete-orphan",
+        order_by="Track.created_at",
+    )
 
 
 class Point(Base):
@@ -43,3 +48,16 @@ class Point(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     map: Mapped[Map] = relationship(back_populates="points")
+
+
+class Track(Base):
+    __tablename__ = "tracks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    map_id: Mapped[int] = mapped_column(ForeignKey("maps.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    color: Mapped[str] = mapped_column(String(20), default="#0a4d5b")
+    gpx_data: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    map: Mapped[Map] = relationship(back_populates="tracks")

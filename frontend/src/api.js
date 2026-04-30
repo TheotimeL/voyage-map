@@ -22,6 +22,9 @@ export const api = {
   addPoint: (slug, payload) => request('POST', `/maps/${slug}/points`, payload),
   patchPoint: (slug, id, payload) => request('PATCH', `/maps/${slug}/points/${id}`, payload),
   deletePoint: (slug, id) => request('DELETE', `/maps/${slug}/points/${id}`),
+
+  addTrack: (slug, payload) => request('POST', `/maps/${slug}/tracks`, payload),
+  deleteTrack: (slug, id) => request('DELETE', `/maps/${slug}/tracks/${id}`),
 }
 
 // Nominatim geocoding (free OSM service). Throttle to be polite.

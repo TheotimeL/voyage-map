@@ -53,6 +53,22 @@ class MapPatch(BaseModel):
     radius_m: float | None = Field(default=None, gt=0, le=2_000_000)
 
 
+class TrackIn(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    color: str = Field(default="#0a4d5b", max_length=20)
+    gpx_data: str = Field(min_length=20, max_length=10_000_000)  # up to ~10 MB
+
+
+class TrackOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str | None
+    color: str
+    gpx_data: str
+    created_at: datetime
+
+
 class MapOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -64,3 +80,4 @@ class MapOut(BaseModel):
     radius_m: float
     created_at: datetime
     points: list[PointOut] = []
+    tracks: list[TrackOut] = []

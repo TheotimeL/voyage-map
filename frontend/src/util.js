@@ -13,6 +13,35 @@ export const CATEGORIES = [
   { key: 'note',    emoji: '📍', label: 'Note' },
 ]
 
+export function parseGPX(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml')
+  if (doc.querySelector('parsererror')) throw new Error('Could not parse GPX file.')
+
+  const collect = (sel) =>
+    Array.from(doc.querySelectorAll(sel))
+      .map((pt) => [parseFloat(pt.getAttribute('lat')), parseFloat(pt.getAttribute('lon'))])
+      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b))
+
+  let coords = collect('trkpt')
+  if (coords.length === 0) coords = collect('rtept')
+  if (coords.length === 0) coords = collect('wpt')
+  if (coords.length === 0) throw new Error('No track or route points found in GPX.')
+
+  const name =
+    doc.querySelector('trk > name')?.textContent?.trim() ||
+    doc.querySelector('rte > name')?.textContent?.trim() ||
+    doc.querySelector('metadata > name')?.textContent?.trim() ||
+    null
+
+  return { coords, name }
+}
+
+export const TRACK_PALETTE = ['#0a4d5b', '#5e6b3b', '#6b3a5a', '#1f3851', '#a85a2b', '#3b6b8a']
+
+export function trackColor(index) {
+  return TRACK_PALETTE[index % TRACK_PALETTE.length]
+}
+
 export function openInMaps(lat, lng, label) {
   const dest = `${lat},${lng}`
   const q = label ? `${dest}(${encodeURIComponent(label)})` : dest

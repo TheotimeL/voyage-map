@@ -61,6 +61,25 @@
           @select="onSelectPoint"
         />
 
+        <hr class="rule" />
+
+        <div class="list-head">
+          <p class="eyebrow">Routes</p>
+          <label class="btn btn-tiny gpx-pick">
+            + GPX
+            <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
+          </label>
+        </div>
+        <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
+        <ul v-if="mapData.tracks && mapData.tracks.length" class="track-list">
+          <li v-for="(t, i) in mapData.tracks" :key="t.id" class="track-row">
+            <span class="track-swatch" :style="{ background: t.color || trackColor(i) }"></span>
+            <span class="track-name">{{ t.name || `Track ${i + 1}` }}</span>
+            <button class="track-del" type="button" :title="`Delete ${t.name || 'track'}`" @click="deleteTrack(t.id)">×</button>
+          </li>
+        </ul>
+        <p v-else class="hint mono">Drop a .gpx anywhere on the map.</p>
+
         <div class="share">
           <p class="lbl">Share this map</p>
           <button class="btn btn-ghost" @click="copyUrl">
@@ -70,7 +89,12 @@
       </template>
     </aside>
 
-    <div class="map-wrap">
+    <div
+      class="map-wrap"
+      @dragover.prevent="onGpxDragOver"
+      @dragleave="onGpxDragLeave"
+      @drop.prevent="onGpxDrop"
+    >
       <div ref="mapEl" class="map"></div>
 
       <button
@@ -83,6 +107,15 @@
       >
         <span class="locate-glyph">⌖</span>
       </button>
+
+      <Transition name="fade">
+        <div v-if="gpxDragging" class="dropzone">
+          <div class="dropzone-inner">
+            <p class="eyebrow">Drop to import</p>
+            <h3>Add a .gpx track</h3>
+          </div>
+        </div>
+      </Transition>
 
       <PointDetailCard
         v-if="detail && !modal"
@@ -107,7 +140,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import L from 'leaflet'
 import { api } from '@/api.js'
-import { CATEGORIES, formatLat, formatLng, getMyLocation } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor } from '@/util.js'
 import PointList from '@/components/PointList.vue'
 import PointFormModal from '@/components/PointFormModal.vue'
 import PointDetailCard from '@/components/PointDetailCard.vue'
@@ -165,6 +198,10 @@ const pointMarkers = new Map()
 const myDot = ref(false) // truthy when blue-dot is shown — used for button styling
 let myDotMarker = null
 let myAccuracyCircle = null
+const trackLines = new Map() // track id → L.polyline
+const gpxDragging = ref(false)
+const gpxError = ref('')
+let dragCounter = 0
 
 const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
 
@@ -233,6 +270,7 @@ function initLeaflet() {
   })
 
   mapData.value.points.forEach(addPointMarker)
+  ;(mapData.value.tracks || []).forEach((t, i) => renderTrack(t, i))
 }
 
 function makePinIcon(glyph, extra = '') {
@@ -310,6 +348,87 @@ function startNewPin() {
 
 function onSelectPoint(p) {
   openDetail(p)
+}
+
+function renderTrack(track, idx) {
+  try {
+    const { coords } = parseGPX(track.gpx_data)
+    const line = L.polyline(coords, {
+      color: track.color || trackColor(idx),
+      weight: 4,
+      opacity: 0.9,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(leaflet)
+    trackLines.set(track.id, line)
+    return line
+  } catch (e) {
+    console.warn('Skipping track', track.id, e)
+    return null
+  }
+}
+
+function removeTrackLine(id) {
+  const line = trackLines.get(id)
+  if (line && leaflet) {
+    leaflet.removeLayer(line)
+    trackLines.delete(id)
+  }
+}
+
+function onGpxDragOver(e) {
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return
+  if (!gpxDragging.value) gpxDragging.value = true
+}
+function onGpxDragLeave(e) {
+  // Only hide when leaving the wrap (not its children)
+  if (e.currentTarget.contains(e.relatedTarget)) return
+  gpxDragging.value = false
+}
+async function onGpxDrop(e) {
+  gpxDragging.value = false
+  dragCounter = 0
+  const files = Array.from(e.dataTransfer?.files || []).filter((f) => /\.gpx$/i.test(f.name))
+  if (files.length === 0) return
+  for (const f of files) {
+    await importGpxFile(f)
+  }
+}
+
+async function importGpxFile(file) {
+  gpxError.value = ''
+  try {
+    const text = await file.text()
+    const { coords, name } = parseGPX(text) // validate before POST
+    const idx = (mapData.value.tracks || []).length
+    const created = await api.addTrack(props.slug, {
+      name: name || file.name.replace(/\.gpx$/i, ''),
+      color: trackColor(idx),
+      gpx_data: text,
+    })
+    if (!mapData.value.tracks) mapData.value.tracks = []
+    mapData.value.tracks.push(created)
+    const line = renderTrack(created, idx)
+    if (line && leaflet) leaflet.fitBounds(line.getBounds(), { padding: [40, 40] })
+  } catch (e) {
+    gpxError.value = e.message || 'Could not import GPX.'
+  }
+}
+
+async function deleteTrack(id) {
+  try {
+    await api.deleteTrack(props.slug, id)
+    mapData.value.tracks = (mapData.value.tracks || []).filter((t) => t.id !== id)
+    removeTrackLine(id)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function onGpxFilePick(e) {
+  const files = Array.from(e.target.files || []).filter((f) => /\.gpx$/i.test(f.name))
+  for (const f of files) await importGpxFile(f)
+  e.target.value = ''
 }
 
 async function showMeOnMap() {
@@ -625,6 +744,66 @@ onBeforeUnmount(() => {
 .locate-me.on { background: #3b82f6; border-color: #1e40af; color: #fff; box-shadow: 0 3px 0 #1e40af, 0 6px 12px rgba(0,0,0,0.18); }
 .locate-me.on:hover { background: #1e40af; }
 .locate-glyph { font-size: 1.3rem; line-height: 1; font-weight: 700; }
+
+/* GPX dropzone */
+.dropzone {
+  position: absolute;
+  inset: 12px;
+  z-index: 750;
+  border: 3px dashed var(--vermillion);
+  background: rgba(243, 237, 228, 0.85);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.dropzone-inner { text-align: center; color: var(--ink); }
+.dropzone-inner h3 { margin-top: 0.4rem; font-size: 1.6rem; }
+
+.fade-enter-active, .fade-leave-active { transition: opacity 140ms ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* Routes section */
+.gpx-pick { cursor: pointer; }
+.track-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.track-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.track-row:hover { background: var(--cream); border-color: var(--cream-edge); }
+.track-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink);
+  display: inline-block;
+}
+.track-name {
+  font-family: var(--body);
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-del {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-faded);
+  cursor: pointer;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+}
+.track-del:hover { color: var(--vermillion); background: var(--cream); }
+.hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
 .share { margin-top: auto; padding-top: 0.6rem; display: grid; gap: 0.4rem; }
 
 @media (max-width: 720px) {
