@@ -84,7 +84,7 @@ function onLeave() {
 <style scoped>
 .elev {
   position: absolute;
-  left: 1rem;
+  left: calc(360px + 32px); /* clears the desktop dock (360px) + its 16px insets */
   right: 5rem; /* leaves room for the FAB cluster on the bottom-right */
   bottom: 1rem;
   max-width: 720px;

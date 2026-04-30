@@ -1103,18 +1103,18 @@ onBeforeUnmount(() => {
 .locate-link:disabled { color: var(--ink-faded); cursor: wait; }
 .error.sm { font-size: 0.82rem; margin: 0; }
 
-/* Floating "show me" map control */
+/* Floating "show me" map control — aligns under the 56px FAB at right: 16px */
 .locate-me {
   position: absolute;
-  bottom: 80px;
-  right: 1.2rem;
+  bottom: 88px; /* sits 16px above the FAB top edge (FAB: bottom 16 + 56 = 72) */
+  right: 16px;
   z-index: 700;
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   background: var(--paper);
   color: var(--ink);
   border: 1.5px solid var(--ink);
-  border-radius: 4px;
+  border-radius: 50%;
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -1123,7 +1123,7 @@ onBeforeUnmount(() => {
 }
 .locate-me:hover { background: var(--ink); color: var(--paper); }
 @media (max-width: 720px) {
-  .locate-me { bottom: 144px; }
+  .locate-me { bottom: 152px; } /* FAB top (80+56=136) + 16px gap */
 }
 .locate-me:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
 .locate-me:disabled { opacity: 0.5; cursor: wait; }
