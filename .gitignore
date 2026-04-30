@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+.DS_Store
+.idea/
+
+# Playwright MCP test artifacts
+.playwright-mcp/
+/*.png

@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI: uvicorn (dev)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["server:app", "--reload", "--port", "8000"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Vite: frontend (dev)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/frontend",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Chrome: attach to Vite",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "sourceMapPathOverrides": {
+        "webpack:///./src/*": "${webRoot}/*"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack (backend + frontend)",
+      "configurations": ["FastAPI: uvicorn (dev)", "Vite: frontend (dev)"],
+      "stopAll": true
+    }
+  ]
+}

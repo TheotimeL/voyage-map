@@ -1,0 +1,482 @@
+<template>
+  <main class="mapview">
+    <aside class="sidebar paper" :class="{ open: sidebarOpen }">
+      <div class="side-head">
+        <router-link to="/" class="back">← Home</router-link>
+        <button class="btn-icon" @click="sidebarOpen = !sidebarOpen" :aria-label="sidebarOpen ? 'Collapse' : 'Expand'">
+          {{ sidebarOpen ? '⟨' : '⟩' }}
+        </button>
+      </div>
+
+      <div v-if="loading" class="loading">Charting…</div>
+      <div v-else-if="error" class="error">{{ error }}</div>
+      <template v-else-if="mapData">
+        <p class="eyebrow">Voyage</p>
+        <h2 class="title">
+          <input
+            v-model="titleDraft"
+            class="title-input"
+            placeholder="Untitled voyage"
+            maxlength="120"
+            @blur="commitTitle"
+            @keydown.enter="$event.target.blur()"
+          />
+        </h2>
+        <p class="coord meta">
+          centred {{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}
+          <br />radius {{ formatRadius(mapData.radius_m) }}
+        </p>
+
+        <RadiusSlider v-model="radiusDraft" @update:modelValue="liveRadius" @change="commitRadius" />
+
+        <hr class="rule" />
+
+        <p class="eyebrow tight">Add a place</p>
+        <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
+
+        <hr class="rule" />
+
+        <div class="list-head">
+          <p class="eyebrow">{{ mapData.points.length }} {{ mapData.points.length === 1 ? 'mark' : 'marks' }}</p>
+          <button class="btn btn-tiny" @click="startNewPin">+ Drop here</button>
+        </div>
+
+        <PointList
+          :points="mapData.points"
+          :active-id="activeId"
+          @select="onSelectPoint"
+        />
+
+        <div class="share">
+          <p class="lbl">Share this map</p>
+          <button class="btn btn-ghost" @click="copyUrl">
+            {{ copied ? 'Copied ✓' : 'Copy link' }}
+          </button>
+        </div>
+      </template>
+    </aside>
+
+    <div class="map-wrap">
+      <div ref="mapEl" class="map"></div>
+
+      <PointDetailCard
+        v-if="detail && !modal"
+        :point="detail"
+        @edit="onEdit"
+        @delete="onDeleteDetail"
+        @close="closeDetail"
+      />
+    </div>
+
+    <PointFormModal
+      v-if="modal"
+      :model-value="modal"
+      :is-new="modal.id == null"
+      @save="onSave"
+      @close="modal = null"
+    />
+  </main>
+</template>
+
+<script setup>
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import L from 'leaflet'
+import { api } from '@/api.js'
+import { CATEGORIES, formatLat, formatLng } from '@/util.js'
+import PointList from '@/components/PointList.vue'
+import PointFormModal from '@/components/PointFormModal.vue'
+import PointDetailCard from '@/components/PointDetailCard.vue'
+import GeocoderSearch from '@/components/GeocoderSearch.vue'
+import RadiusSlider from '@/components/RadiusSlider.vue'
+
+const props = defineProps({
+  slug: { type: String, required: true },
+})
+
+const mapData = ref(null)
+const loading = ref(true)
+const error = ref('')
+const titleDraft = ref('')
+const radiusDraft = ref(5000)
+const sidebarOpen = ref(true)
+const activeId = ref(null)
+const modal = ref(null)
+const detail = ref(null)
+const copied = ref(false)
+
+const mapEl = ref(null)
+let leaflet = null
+let centerMarker = null
+let circle = null
+const pointMarkers = new Map()
+
+const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
+
+onMounted(async () => {
+  try {
+    const m = await api.getMap(props.slug)
+    mapData.value = m
+    titleDraft.value = m.title || ''
+    radiusDraft.value = m.radius_m
+    loading.value = false
+    await nextTick()
+    initLeaflet()
+  } catch (e) {
+    error.value = 'This map could not be found.'
+    loading.value = false
+  }
+})
+
+function initLeaflet() {
+  leaflet = L.map(mapEl.value, {
+    zoomControl: true,
+    attributionControl: true,
+  })
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 19,
+  }).addTo(leaflet)
+
+  const center = [mapData.value.center_lat, mapData.value.center_lng]
+  leaflet.setView(center, zoomForRadius(mapData.value.radius_m))
+
+  circle = L.circle(center, {
+    radius: mapData.value.radius_m,
+    color: '#8b3a3a',
+    weight: 2,
+    fillColor: '#b88a4a',
+    fillOpacity: 0.10,
+    dashArray: '4 6',
+    interactive: false,
+  }).addTo(leaflet)
+
+  centerMarker = L.marker(center, {
+    icon: makePinIcon('⚑', 'center-pin'),
+    draggable: true,
+    title: 'Voyage center — drag to move',
+  }).addTo(leaflet)
+  centerMarker.on('drag', (e) => {
+    const ll = e.target.getLatLng()
+    circle.setLatLng(ll)
+  })
+  centerMarker.on('dragend', async (e) => {
+    const ll = e.target.getLatLng()
+    try {
+      const updated = await api.patchMap(props.slug, { center_lat: ll.lat, center_lng: ll.lng })
+      mapData.value = updated
+    } catch {
+      centerMarker.setLatLng([mapData.value.center_lat, mapData.value.center_lng])
+      circle.setLatLng([mapData.value.center_lat, mapData.value.center_lng])
+    }
+  })
+
+  leaflet.on('click', (e) => {
+    // Empty-map click = explicit intent to add a new pin here.
+    detail.value = null
+    activeId.value = null
+    modal.value = {
+      lat: e.latlng.lat,
+      lng: e.latlng.lng,
+      title: '',
+      comment: '',
+      category: 'note',
+    }
+  })
+
+  mapData.value.points.forEach(addPointMarker)
+}
+
+function makePinIcon(glyph, extra = '') {
+  return L.divIcon({
+    className: `pin-wrapper ${extra}`,
+    html: `<div class="pin"><span>${glyph}</span></div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+  })
+}
+
+function addPointMarker(p) {
+  const m = L.marker([p.lat, p.lng], {
+    icon: makePinIcon(emojiByCategory[p.category] || '📍'),
+  }).addTo(leaflet)
+  m.on('click', (e) => {
+    L.DomEvent.stop(e)
+    openDetail(p)
+  })
+  pointMarkers.set(p.id, m)
+}
+
+function removePointMarker(id) {
+  const m = pointMarkers.get(id)
+  if (m) {
+    leaflet.removeLayer(m)
+    pointMarkers.delete(id)
+  }
+}
+
+function openDetail(p) {
+  // Always read the freshest version from state (in case it was edited).
+  const fresh = mapData.value.points.find((x) => x.id === p.id) || p
+  detail.value = { ...fresh }
+  activeId.value = fresh.id
+  modal.value = null
+  if (leaflet) {
+    leaflet.flyTo([fresh.lat, fresh.lng], Math.max(leaflet.getZoom(), 13), { duration: 0.4 })
+  }
+}
+
+function closeDetail() {
+  detail.value = null
+  activeId.value = null
+}
+
+function onEdit() {
+  if (!detail.value) return
+  modal.value = { ...detail.value }
+  detail.value = null
+}
+
+async function onDeleteDetail() {
+  if (!detail.value?.id) return
+  await deletePoint(detail.value.id)
+  detail.value = null
+  activeId.value = null
+}
+
+async function deletePoint(id) {
+  try {
+    await api.deletePoint(props.slug, id)
+    mapData.value.points = mapData.value.points.filter((p) => p.id !== id)
+    removePointMarker(id)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+function startNewPin() {
+  const c = leaflet.getCenter()
+  modal.value = { lat: c.lat, lng: c.lng, title: '', comment: '', category: 'note' }
+  detail.value = null
+}
+
+function onSelectPoint(p) {
+  openDetail(p)
+}
+
+function onSearchPick(r) {
+  // Picking a search result opens the new-point modal at that location, pre-titled.
+  const name = r.label.split(',')[0]
+  if (leaflet) leaflet.flyTo([r.lat, r.lng], 14, { duration: 0.5 })
+  detail.value = null
+  activeId.value = null
+  modal.value = {
+    lat: r.lat,
+    lng: r.lng,
+    title: name,
+    comment: '',
+    category: 'note',
+  }
+}
+
+async function onSave(payload) {
+  if (!modal.value) return
+  try {
+    if (modal.value.id) {
+      const updated = await api.patchPoint(props.slug, modal.value.id, payload)
+      const idx = mapData.value.points.findIndex((p) => p.id === updated.id)
+      if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
+      removePointMarker(updated.id)
+      addPointMarker(updated)
+      // Re-open detail with the updated content.
+      detail.value = { ...updated }
+      activeId.value = updated.id
+    } else {
+      const created = await api.addPoint(props.slug, {
+        ...payload,
+        lat: modal.value.lat,
+        lng: modal.value.lng,
+      })
+      mapData.value.points.push(created)
+      addPointMarker(created)
+      activeId.value = created.id
+      detail.value = { ...created }
+    }
+    modal.value = null
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function commitTitle() {
+  const t = titleDraft.value.trim() || null
+  if (t === (mapData.value.title || null)) return
+  try {
+    mapData.value = await api.patchMap(props.slug, { title: t })
+  } catch {
+    titleDraft.value = mapData.value.title || ''
+  }
+}
+
+function liveRadius(v) {
+  if (circle) circle.setRadius(v)
+}
+
+async function commitRadius(v) {
+  if (v === mapData.value.radius_m) return
+  try {
+    mapData.value = await api.patchMap(props.slug, { radius_m: v })
+    if (leaflet) leaflet.setView([mapData.value.center_lat, mapData.value.center_lng], zoomForRadius(mapData.value.radius_m), { animate: true })
+  } catch {
+    radiusDraft.value = mapData.value.radius_m
+    if (circle) circle.setRadius(mapData.value.radius_m)
+  }
+}
+
+function copyUrl() {
+  navigator.clipboard.writeText(window.location.href)
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1800)
+}
+
+function zoomForRadius(m) {
+  if (m < 1500) return 14
+  if (m < 4000) return 13
+  if (m < 10000) return 12
+  if (m < 25000) return 11
+  if (m < 60000) return 10
+  if (m < 150000) return 9
+  if (m < 400000) return 8
+  if (m < 900000) return 7
+  return 6
+}
+
+function formatRadius(m) {
+  if (m < 1000) return `${m} m`
+  const km = m / 1000
+  return `${km % 1 === 0 ? km : km.toFixed(1)} km`
+}
+
+onBeforeUnmount(() => {
+  if (leaflet) {
+    leaflet.remove()
+    leaflet = null
+  }
+})
+</script>
+
+<style scoped>
+.mapview {
+  position: fixed;
+  inset: 0;
+  display: flex;
+}
+.map-wrap {
+  flex: 1;
+  position: relative;
+  height: 100%;
+}
+.map {
+  width: 100%;
+  height: 100%;
+  background: var(--paper-deep);
+}
+.sidebar {
+  width: 360px;
+  max-width: 86vw;
+  height: 100%;
+  border-right: 1px solid var(--paper-edge);
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  padding: 1.2rem 1.3rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow-y: auto;
+  transition: width 220ms ease, padding 220ms ease;
+  z-index: 2;
+  box-shadow: 4px 0 18px -8px rgba(40, 20, 0, 0.28);
+}
+.sidebar:not(.open) {
+  width: 56px;
+  padding: 1.2rem 0.5rem;
+  overflow: hidden;
+}
+.sidebar:not(.open) > *:not(.side-head) { display: none; }
+
+.side-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.back {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border-bottom: none;
+}
+.back:hover { color: var(--oxblood); }
+.btn-icon {
+  background: transparent;
+  border: 1px solid var(--ink-faded);
+  border-radius: 2px;
+  width: 2rem; height: 2rem;
+  display: grid; place-items: center;
+  font-family: var(--serif-display);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.btn-icon:hover { color: var(--oxblood); border-color: var(--oxblood); }
+
+.loading, .error {
+  padding: 2rem 0;
+  font-style: italic;
+  color: var(--ink-faded);
+  text-align: center;
+}
+.error { color: var(--oxblood-deep); }
+
+.title { margin: 0; }
+.title-input {
+  font-family: var(--serif-display);
+  font-size: 1.7rem;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted transparent;
+  width: 100%;
+  padding: 0.05em 0;
+  outline: none;
+}
+.title-input:focus, .title-input:hover { border-bottom-color: var(--ink-faded); }
+.title-input::placeholder { color: var(--ink-faded); font-style: italic; }
+
+.meta { margin: 0.2rem 0 0.4rem; font-size: 0.85rem; line-height: 1.55; }
+.rule {
+  border: none;
+  border-top: 1px solid var(--paper-edge);
+  margin: 0.4rem 0 0.2rem;
+}
+.list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.lbl {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.eyebrow.tight { margin: 0; }
+.share { margin-top: auto; padding-top: 0.6rem; display: grid; gap: 0.4rem; }
+
+@media (max-width: 720px) {
+  .mapview { flex-direction: column-reverse; }
+  .sidebar { width: 100%; max-height: 50vh; border-right: none; border-top: 1px solid var(--paper-edge); }
+  .sidebar:not(.open) { max-height: 56px; }
+}
+</style>

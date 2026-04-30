@@ -1,0 +1,20 @@
+# Render Blueprint — single Docker web service with a persistent disk for SQLite.
+# Deploy: push to GitHub, then "New + Blueprint" in Render, point at this repo.
+
+services:
+  - type: web
+    name: voyage-map
+    runtime: docker
+    plan: starter           # smallest paid tier with persistent disk; use `free` to test (no disk)
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////data/voyage_map.db
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    disk:
+      name: voyage-data
+      mountPath: /data
+      sizeGB: 1

@@ -1,0 +1,216 @@
+/* Voyage Map — vintage cartography design system. */
+
+:root {
+  --paper:        #f4ecd8;
+  --paper-deep:   #ead9b6;
+  --paper-edge:   #d4be90;
+  --ink:          #2f2418;
+  --ink-soft:     #5a4631;
+  --ink-faded:    #8c7758;
+  --oxblood:      #8b3a3a;
+  --oxblood-deep: #6a2828;
+  --gold:         #b88a4a;
+  --leaf:         #5e6b3b;
+  --sea:          #6c8aa3;
+
+  --serif-display: 'IM Fell English', 'Cormorant Garamond', Georgia, serif;
+  --serif-body:    'EB Garamond', Georgia, serif;
+  --mono:          'Courier Prime', 'Courier New', monospace;
+
+  --grain-url: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18  0 0 0 0 0.14  0 0 0 0 0.09  0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/></svg>");
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--serif-body);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  background-image:
+    radial-gradient(1200px 800px at 10% -10%, rgba(255, 245, 220, 0.55), transparent 60%),
+    radial-gradient(900px 700px at 110% 110%, rgba(120, 80, 40, 0.18), transparent 55%),
+    var(--grain-url);
+  background-blend-mode: normal, multiply, multiply;
+}
+
+a { color: var(--oxblood); text-decoration: none; border-bottom: 1px dotted currentColor; }
+a:hover { color: var(--oxblood-deep); }
+
+h1, h2, h3 {
+  font-family: var(--serif-display);
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  margin: 0 0 0.4em;
+}
+
+h1 { font-size: clamp(2.6rem, 6vw, 4.4rem); line-height: 1.05; }
+h2 { font-size: 1.8rem; }
+h3 { font-size: 1.25rem; }
+
+.coord, .mono { font-family: var(--mono); font-size: 0.92em; color: var(--ink-soft); letter-spacing: 0.02em; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+
+/* Inputs ------------------------------------------------------------ */
+.field {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 1.05rem;
+  padding: 0.7em 0.9em;
+  background: rgba(255, 252, 240, 0.7);
+  border: 1px solid var(--ink-faded);
+  border-radius: 2px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.field::placeholder { color: var(--ink-faded); font-style: italic; }
+.field:focus { border-color: var(--oxblood); background: rgba(255, 252, 240, 0.95); }
+
+textarea.field { min-height: 5.5em; resize: vertical; }
+
+/* Buttons ----------------------------------------------------------- */
+.btn {
+  font-family: var(--serif-display);
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  padding: 0.7em 1.4em;
+  background: var(--oxblood);
+  color: var(--paper);
+  border: 1px solid var(--oxblood-deep);
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 2px 4px rgba(40, 20, 0, 0.18);
+  transition: transform 90ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.btn:hover { background: var(--oxblood-deep); }
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(40, 20, 0, 0.15); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  box-shadow: none;
+}
+.btn-ghost:hover { background: rgba(139, 58, 58, 0.08); border-color: var(--oxblood); color: var(--oxblood); }
+
+.btn-tiny {
+  font-size: 0.85rem;
+  padding: 0.35em 0.8em;
+  letter-spacing: 0.04em;
+}
+
+/* Slider ------------------------------------------------------------ */
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  background: transparent;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--ink-faded);
+  border-radius: 1px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--oxblood);
+  border: 2px solid var(--paper);
+  margin-top: -8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-track { height: 2px; background: var(--ink-faded); }
+input[type="range"]::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--oxblood); border: 2px solid var(--paper);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+}
+
+/* Vintage map filter on Leaflet tiles -------------------------------- */
+.leaflet-container {
+  background: #ead9b6;
+  font-family: var(--serif-body);
+}
+.leaflet-tile-pane {
+  filter: sepia(0.55) saturate(0.7) hue-rotate(-8deg) contrast(0.95) brightness(1.02);
+}
+.leaflet-control-attribution {
+  background: rgba(244, 236, 216, 0.85) !important;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-soft) !important;
+  padding: 2px 6px;
+  border-radius: 2px 0 0 0;
+}
+.leaflet-control-attribution a { color: var(--oxblood) !important; border-bottom: none !important; }
+
+.leaflet-control-zoom a {
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--ink-faded) !important;
+  font-family: var(--serif-display) !important;
+}
+.leaflet-control-zoom a:hover { background: var(--paper-deep) !important; }
+
+/* Custom pin marker */
+.pin {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 2px solid var(--oxblood);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 4px 8px rgba(40, 20, 0, 0.35);
+}
+.pin > span { transform: rotate(45deg); }
+
+/* Radius circle (Leaflet path) overrides via class via L.circle option */
+.radius-circle {
+  /* color set via JS — these are fallbacks */
+  stroke: var(--oxblood);
+}
+
+/* Paper card ------------------------------------------------------- */
+.paper {
+  background: var(--paper);
+  background-image: var(--grain-url);
+  border: 1px solid var(--paper-edge);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 12px 30px -10px rgba(40, 20, 0, 0.25);
+  padding: 1.4rem 1.6rem;
+}
+
+/* Modal scrim */
+.scrim {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(40, 24, 10, 0.4);
+  display: grid; place-items: center;
+  padding: 1rem;
+}
+
+/* Utility */
+.hidden { display: none !important; }
