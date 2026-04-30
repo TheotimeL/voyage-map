@@ -7,6 +7,7 @@
       @update:active="(k) => activeTab = k"
     >
       <template #header>
+        <RouterLink to="/" class="dock-back mono" title="Back to all voyages">← Voyages</RouterLink>
         <h2 class="title">
           <input
             v-model="titleDraft"
@@ -1044,6 +1045,18 @@ onBeforeUnmount(() => {
   transition: color 90ms, border-color 90ms;
 }
 .recenter:hover { color: var(--vermillion); border-color: var(--vermillion); }
+
+.dock-back {
+  display: inline-block;
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  text-decoration: none;
+  margin-bottom: 0.35rem;
+  align-self: flex-start;
+}
+.dock-back:hover { color: var(--vermillion); }
 
 .locate-link {
   background: transparent;
