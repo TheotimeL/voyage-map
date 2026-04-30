@@ -362,9 +362,9 @@ function initLeaflet() {
   renderItinerary()
 }
 
-function makeItineraryIcon(num) {
+function makeItineraryIcon(num, isToday = false) {
   return L.divIcon({
-    className: 'iti-pin-wrapper',
+    className: `iti-pin-wrapper${isToday ? ' is-today' : ''}`,
     html: `<div class="iti-pin"><span>${num}</span></div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
@@ -382,10 +382,11 @@ function renderItinerary() {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
 
+  const today = todayISO()
   const coords = []
   days.forEach((d, i) => {
     const m = L.marker([d.lat, d.lng], {
-      icon: makeItineraryIcon(i + 1),
+      icon: makeItineraryIcon(i + 1, d.date === today),
       title: `${d.label || 'Day'} — ${d.date}`,
       zIndexOffset: 600,
     }).addTo(leaflet)

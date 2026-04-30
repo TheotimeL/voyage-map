@@ -233,6 +233,27 @@ input[type="range"]::-moz-range-thumb {
 }
 .iti-pin:hover { background: var(--vermillion); }
 
+/* Today: vermillion fill + concentric pulse so the active stop reads at a glance. */
+.iti-pin-wrapper.is-today .iti-pin {
+  background: var(--vermillion);
+  border-color: var(--paper);
+  box-shadow: 0 2px 6px rgba(232, 93, 60, 0.5);
+}
+.iti-pin-wrapper.is-today::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--vermillion);
+  animation: iti-pulse 1.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes iti-pulse {
+  0%   { transform: scale(0.85); opacity: 0.9; }
+  70%  { transform: scale(1.4);  opacity: 0; }
+  100% { transform: scale(1.4);  opacity: 0; }
+}
+
 .survival-pin .sp {
   display: grid;
   place-items: center;
