@@ -221,6 +221,12 @@ watch(visiblePoints, (next) => {
   }
 })
 
+watch(
+  () => mapData.value?.itinerary,
+  () => renderItinerary(),
+  { deep: true },
+)
+
 function toggleCat(key) {
   const s = new Set(hiddenCats.value)
   if (s.has(key)) s.delete(key)
@@ -238,6 +244,8 @@ const myDot = ref(false) // truthy when blue-dot is shown — used for button st
 let myDotMarker = null
 let myAccuracyCircle = null
 const trackLines = new Map() // track id → L.polyline
+const itineraryMarkers = new Map() // day id → L.marker
+let itineraryLine = null
 const gpxDragging = ref(false)
 const gpxError = ref('')
 let dragCounter = 0
@@ -310,6 +318,51 @@ function initLeaflet() {
 
   mapData.value.points.forEach(addPointMarker)
   ;(mapData.value.tracks || []).forEach((t, i) => renderTrack(t, i))
+  renderItinerary()
+}
+
+function makeItineraryIcon(num) {
+  return L.divIcon({
+    className: 'iti-pin-wrapper',
+    html: `<div class="iti-pin"><span>${num}</span></div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  })
+}
+
+function renderItinerary() {
+  if (!leaflet) return
+  for (const m of itineraryMarkers.values()) leaflet.removeLayer(m)
+  itineraryMarkers.clear()
+  if (itineraryLine) { leaflet.removeLayer(itineraryLine); itineraryLine = null }
+
+  const days = (mapData.value?.itinerary || [])
+    .filter((d) => d.lat != null && d.lng != null)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  const coords = []
+  days.forEach((d, i) => {
+    const m = L.marker([d.lat, d.lng], {
+      icon: makeItineraryIcon(i + 1),
+      title: `${d.label || 'Day'} — ${d.date}`,
+      zIndexOffset: 600,
+    }).addTo(leaflet)
+    m.on('click', () => onGoDay(d))
+    itineraryMarkers.set(d.id, m)
+    coords.push([d.lat, d.lng])
+  })
+
+  if (coords.length >= 2) {
+    itineraryLine = L.polyline(coords, {
+      color: '#1f3851',
+      weight: 2.5,
+      opacity: 0.9,
+      dashArray: '4 8',
+      lineCap: 'round',
+      interactive: false,
+    }).addTo(leaflet)
+  }
 }
 
 function makePinIcon(glyph, extra = '') {
