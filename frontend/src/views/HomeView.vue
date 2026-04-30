@@ -39,9 +39,8 @@
 
       <Transition name="reveal">
         <div v-if="picked" class="preview-wrap">
-          <p class="eyebrow lbl">02 · How wide?</p>
+          <p class="eyebrow lbl">02 · Preview</p>
           <div ref="mapEl" class="preview-map"></div>
-          <RadiusSlider v-model="radiusM" @change="updateCircle" />
 
           <p class="eyebrow lbl">03 · Name it (optional) and go</p>
           <div class="row">
@@ -67,20 +66,18 @@
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import L from 'leaflet'
 import { api } from '@/api.js'
 import { getMyLocation } from '@/util.js'
 import CompassRose from '@/components/CompassRose.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
-import RadiusSlider from '@/components/RadiusSlider.vue'
 
 const router = useRouter()
 const year = new Date().getFullYear()
 
 const picked = ref(null)
-const radiusM = ref(50000)
 const title = ref('')
 const creating = ref(false)
 const error = ref('')
@@ -90,9 +87,6 @@ const locateError = ref('')
 const mapEl = ref(null)
 let map = null
 let centerMarker = null
-let circle = null
-
-watch(radiusM, () => updateCircle())
 
 async function useMyLocation() {
   locating.value = true
@@ -111,10 +105,8 @@ async function onPick(r) {
   picked.value = r
   await nextTick()
   ensureMap()
-  map.setView([r.lat, r.lng], zoomForRadius(radiusM.value))
+  map.setView([r.lat, r.lng], 9)
   centerMarker.setLatLng([r.lat, r.lng])
-  circle.setLatLng([r.lat, r.lng])
-  circle.setRadius(radiusM.value)
 }
 
 function ensureMap() {
@@ -133,37 +125,8 @@ function ensureMap() {
   centerMarker = L.marker([0, 0], { icon: makePinIcon('⚑', 'center-pin'), draggable: true }).addTo(map)
   centerMarker.on('drag', (e) => {
     const ll = e.target.getLatLng()
-    circle.setLatLng(ll)
     picked.value = { ...picked.value, lat: ll.lat, lng: ll.lng }
   })
-  circle = L.circle([0, 0], {
-    radius: radiusM.value,
-    color: '#e85d3c',
-    weight: 2.5,
-    fillColor: '#e85d3c',
-    fillOpacity: 0.08,
-    dashArray: '6 6',
-  }).addTo(map)
-}
-
-function updateCircle() {
-  if (!circle) return
-  circle.setRadius(radiusM.value)
-  if (picked.value && map) {
-    map.setView([picked.value.lat, picked.value.lng], zoomForRadius(radiusM.value), { animate: true })
-  }
-}
-
-function zoomForRadius(m) {
-  if (m < 1500) return 14
-  if (m < 4000) return 13
-  if (m < 10000) return 12
-  if (m < 25000) return 11
-  if (m < 60000) return 10
-  if (m < 150000) return 9
-  if (m < 400000) return 8
-  if (m < 900000) return 7
-  return 6
 }
 
 function makePinIcon(glyph, extra = '') {
@@ -184,7 +147,7 @@ async function create() {
       title: title.value.trim() || null,
       center_lat: picked.value.lat,
       center_lng: picked.value.lng,
-      radius_m: radiusM.value,
+      radius_m: 50000,
     })
     router.push({ name: 'map', params: { slug: m.slug } })
   } catch (e) {

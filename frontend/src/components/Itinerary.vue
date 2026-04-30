@@ -1,8 +1,7 @@
 <template>
   <section class="iti">
-    <div class="iti-head">
-      <button v-if="todayDay" class="btn btn-tiny" type="button" @click="goToday">Today →</button>
-      <button class="btn btn-tiny btn-ghost" type="button" @click="showPaste = true">Paste</button>
+    <div v-if="todayDay" class="iti-head">
+      <button class="btn btn-tiny" type="button" @click="goToday">Today →</button>
     </div>
 
     <p v-if="days.length" class="iti-meta mono">
@@ -32,62 +31,26 @@
         <button class="iti-del" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
       </li>
     </ol>
-    <p v-else class="hint mono">Paste your trip schedule, or add days one at a time.</p>
+    <p v-else class="hint mono">No days yet — add one below.</p>
 
     <form class="iti-add" @submit.prevent="addDay">
       <input v-model="form.date" type="date" class="field tiny" :min="firstISO" required />
       <input v-model="form.label" type="text" class="field tiny" placeholder="Where?" maxlength="200" />
       <button class="btn btn-tiny" type="submit">+ Add</button>
     </form>
-
-    <Teleport to="body">
-      <div v-if="showPaste" class="scrim" @click.self="showPaste = false">
-        <form class="paper paste-modal" @submit.prevent="doPaste">
-          <p class="eyebrow">Paste itinerary</p>
-          <h3>Bulk import</h3>
-          <p class="paste-help">
-            Paste rows from your spreadsheet — tab, comma, or semicolon separated.
-            Header row optional. Recognised columns: <span class="mono">date · lieu de dodo · lieu · lieu prévu · notes</span>.
-          </p>
-          <textarea
-            v-model="pasteText"
-            class="field"
-            rows="8"
-            placeholder="Date&#9;Lieu de dodo&#9;Lieu&#9;Lieu Dodo prévu&#9;Notes&#10;samedi 9 mai&#9;Excalibur Hotel&#9;Las Vegas&#9;Las Vegas&#10;…"
-          />
-          <label class="row-inline">
-            <span class="lbl">Year</span>
-            <input v-model.number="pasteYear" type="number" min="2000" max="2100" class="field tiny year-field" />
-            <span v-if="parsedPreview.length" class="parsed mono">{{ parsedPreview.length }} day{{ parsedPreview.length === 1 ? '' : 's' }} detected</span>
-          </label>
-          <p v-if="pasteError" class="error sm">{{ pasteError }}</p>
-          <div class="row">
-            <button type="button" class="btn btn-ghost" @click="showPaste = false">Cancel</button>
-            <button type="submit" class="btn" :disabled="!parsedPreview.length || importing">
-              {{ importing ? 'Importing…' : `Import ${parsedPreview.length} days` }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </Teleport>
   </section>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { parseItineraryPaste, todayISO } from '@/util.js'
+import { computed, reactive } from 'vue'
+import { todayISO } from '@/util.js'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['add', 'add-bulk', 'delete', 'go'])
+const emit = defineEmits(['add', 'delete', 'go'])
 
 const today = computed(() => todayISO())
-const showPaste = ref(false)
-const pasteText = ref('')
-const pasteYear = ref(new Date().getFullYear())
-const pasteError = ref('')
-const importing = ref(false)
 
 const form = reactive({ date: today.value, label: '' })
 
@@ -96,12 +59,6 @@ const firstISO = computed(() => '2020-01-01')
 const todayIdx = computed(() => props.days.findIndex((d) => d.date === today.value))
 const todayDay = computed(() => (todayIdx.value >= 0 ? props.days[todayIdx.value] : null))
 const firstFutureIdx = computed(() => props.days.findIndex((d) => d.date > today.value))
-
-const parsedPreview = computed(() => {
-  if (!pasteText.value.trim()) return []
-  try { return parseItineraryPaste(pasteText.value, pasteYear.value) }
-  catch { return [] }
-})
 
 function isToday(date) { return date === today.value }
 function isPast(date) { return date < today.value }
@@ -134,21 +91,6 @@ function del(d) {
 
 function goToday() {
   if (todayDay.value) emit('go', todayDay.value)
-}
-
-async function doPaste() {
-  if (!parsedPreview.value.length) return
-  importing.value = true
-  pasteError.value = ''
-  try {
-    await emit('add-bulk', parsedPreview.value)
-    showPaste.value = false
-    pasteText.value = ''
-  } catch (e) {
-    pasteError.value = e?.message || 'Import failed.'
-  } finally {
-    importing.value = false
-  }
 }
 </script>
 

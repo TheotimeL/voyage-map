@@ -20,11 +20,8 @@
         <p class="coord meta">
           <span class="meta-icon">⌖</span>
           <span>{{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}</span>
+          <button v-if="hasContent" class="recenter mono" type="button" @click="recenter" title="Re-fit to points + itinerary">↻ Fit</button>
         </p>
-        <div class="radius-row">
-          <span class="radius-label mono">Radius · {{ formatRadius(mapData.radius_m) }}</span>
-          <RadiusSlider v-model="radiusDraft" @update:modelValue="liveRadius" @change="commitRadius" />
-        </div>
       </template>
 
       <template #places>
@@ -47,7 +44,6 @@
         <Itinerary
           :days="mapData.itinerary || []"
           @add="onAddDay"
-          @add-bulk="onAddBulk"
           @delete="onDeleteDay"
           @go="onGoDay"
         />
@@ -163,7 +159,6 @@ import PointList from '@/components/PointList.vue'
 import PointFormModal from '@/components/PointFormModal.vue'
 import PointDetailCard from '@/components/PointDetailCard.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
-import RadiusSlider from '@/components/RadiusSlider.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
 import ElevationProfile from '@/components/ElevationProfile.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
@@ -180,7 +175,6 @@ const mapData = ref(null)
 const loading = ref(true)
 const error = ref('')
 const titleDraft = ref('')
-const radiusDraft = ref(5000)
 const activeTab = ref('places')
 const tabs = [
   { key: 'places', label: 'Places', icon: '📍' },
@@ -261,8 +255,6 @@ function resetCats() { hiddenCats.value = new Set() }
 
 const mapEl = ref(null)
 let leaflet = null
-let centerMarker = null
-let circle = null
 let tileLayer = null
 function tileUrl() {
   const style = theme.value === 'dark' ? 'dark_all' : 'light_all'
@@ -318,7 +310,6 @@ onMounted(async () => {
     const m = await api.getMap(props.slug)
     mapData.value = m
     titleDraft.value = m.title || ''
-    radiusDraft.value = m.radius_m
     loading.value = false
     await nextTick()
     initLeaflet()
@@ -343,37 +334,8 @@ function initLeaflet() {
   attachTiles()
 
   const center = [mapData.value.center_lat, mapData.value.center_lng]
-  leaflet.setView(center, zoomForRadius(mapData.value.radius_m))
-
-  circle = L.circle(center, {
-    radius: mapData.value.radius_m,
-    color: '#e85d3c',
-    weight: 2.5,
-    fillColor: '#e85d3c',
-    fillOpacity: 0.07,
-    dashArray: '6 6',
-    interactive: false,
-  }).addTo(leaflet)
-
-  centerMarker = L.marker(center, {
-    icon: makePinIcon('⚑', 'center-pin'),
-    draggable: true,
-    title: 'Voyage center — drag to move',
-  }).addTo(leaflet)
-  centerMarker.on('drag', (e) => {
-    const ll = e.target.getLatLng()
-    circle.setLatLng(ll)
-  })
-  centerMarker.on('dragend', async (e) => {
-    const ll = e.target.getLatLng()
-    try {
-      const updated = await api.patchMap(props.slug, { center_lat: ll.lat, center_lng: ll.lng })
-      mapData.value = updated
-    } catch {
-      centerMarker.setLatLng([mapData.value.center_lat, mapData.value.center_lng])
-      circle.setLatLng([mapData.value.center_lat, mapData.value.center_lng])
-    }
-  })
+  // Initial view: fit to points + itinerary if any, otherwise centre on the map's saved center.
+  fitToContent({ initial: true, fallbackCenter: center })
 
   leaflet.on('click', () => {
     // Empty-map click only dismisses an open detail card — no implicit pin drop.
@@ -637,14 +599,6 @@ async function onAddDay(payload) {
   } catch (e) { error.value = e.message }
 }
 
-async function onAddBulk(rows) {
-  try {
-    const created = await api.addItineraryBulk(props.slug, rows)
-    if (!mapData.value.itinerary) mapData.value.itinerary = []
-    mapData.value.itinerary = [...mapData.value.itinerary, ...created].sort((a, b) => a.date.localeCompare(b.date))
-  } catch (e) { error.value = e.message; throw e }
-}
-
 async function onDeleteDay(day) {
   try {
     await api.deleteItineraryDay(props.slug, day.id)
@@ -807,44 +761,45 @@ async function commitTitle() {
   }
 }
 
-function liveRadius(v) {
-  if (circle) circle.setRadius(v)
-}
-
-async function commitRadius(v) {
-  if (v === mapData.value.radius_m) return
-  try {
-    mapData.value = await api.patchMap(props.slug, { radius_m: v })
-    if (leaflet) leaflet.setView([mapData.value.center_lat, mapData.value.center_lng], zoomForRadius(mapData.value.radius_m), { animate: true })
-  } catch {
-    radiusDraft.value = mapData.value.radius_m
-    if (circle) circle.setRadius(mapData.value.radius_m)
-  }
-}
-
 function copyUrl() {
   navigator.clipboard.writeText(window.location.href)
   copied.value = true
   setTimeout(() => (copied.value = false), 1800)
 }
 
-function zoomForRadius(m) {
-  if (m < 1500) return 14
-  if (m < 4000) return 13
-  if (m < 10000) return 12
-  if (m < 25000) return 11
-  if (m < 60000) return 10
-  if (m < 150000) return 9
-  if (m < 400000) return 8
-  if (m < 900000) return 7
-  return 6
+const hasContent = computed(() => {
+  if (!mapData.value) return false
+  const ps = mapData.value.points || []
+  const its = (mapData.value.itinerary || []).filter((d) => d.lat != null && d.lng != null)
+  return ps.length > 0 || its.length > 0
+})
+
+function collectFitCoords() {
+  if (!mapData.value) return []
+  const out = []
+  for (const p of mapData.value.points || []) out.push([p.lat, p.lng])
+  for (const d of mapData.value.itinerary || []) {
+    if (d.lat != null && d.lng != null) out.push([d.lat, d.lng])
+  }
+  return out
 }
 
-function formatRadius(m) {
-  if (m < 1000) return `${m} m`
-  const km = m / 1000
-  return `${km % 1 === 0 ? km : km.toFixed(1)} km`
+function fitToContent({ initial = false, fallbackCenter = null } = {}) {
+  if (!leaflet) return
+  const coords = collectFitCoords()
+  if (coords.length === 0) {
+    if (initial && fallbackCenter) leaflet.setView(fallbackCenter, 6)
+    return
+  }
+  if (coords.length === 1) {
+    leaflet.setView(coords[0], 11, { animate: !initial })
+    return
+  }
+  const bounds = L.latLngBounds(coords)
+  leaflet.fitBounds(bounds, { padding: [60, 60], animate: !initial, maxZoom: 13 })
 }
+
+function recenter() { fitToContent() }
 
 onBeforeUnmount(() => {
   if (leaflet) {
@@ -901,18 +856,19 @@ onBeforeUnmount(() => {
 }
 .meta-icon { color: var(--vermillion); font-weight: 700; }
 
-.radius-row {
-  display: grid;
-  gap: 0.3rem;
-  margin-top: 0.25rem;
+.recenter {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--cream-edge);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: color 90ms, border-color 90ms;
 }
-.radius-label {
-  font-size: 0.66rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-faded);
-}
-
+.recenter:hover { color: var(--vermillion); border-color: var(--vermillion); }
 
 .locate-link {
   background: transparent;

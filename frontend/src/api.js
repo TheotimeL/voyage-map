@@ -24,7 +24,6 @@ export const api = {
   deletePoint: (slug, id) => request('DELETE', `/maps/${slug}/points/${id}`),
 
   addItineraryDay: (slug, payload) => request('POST', `/maps/${slug}/itinerary`, payload),
-  addItineraryBulk: (slug, payload) => request('POST', `/maps/${slug}/itinerary/bulk`, payload),
   patchItineraryDay: (slug, id, payload) => request('PATCH', `/maps/${slug}/itinerary/${id}`, payload),
   deleteItineraryDay: (slug, id) => request('DELETE', `/maps/${slug}/itinerary/${id}`),
   clearItinerary: (slug) => request('DELETE', `/maps/${slug}/itinerary`),
