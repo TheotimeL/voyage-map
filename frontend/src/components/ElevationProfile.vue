@@ -83,7 +83,10 @@ function onLeave() {
 <style scoped>
 .elev {
   position: absolute;
-  left: 1rem; right: 1rem; bottom: 1rem;
+  left: 1rem;
+  right: 5rem; /* leaves room for the FAB cluster on the bottom-right */
+  bottom: 1rem;
+  max-width: 720px;
   z-index: 700;
   background: var(--paper);
   border: 1px solid var(--cream-edge);
@@ -92,6 +95,9 @@ function onLeave() {
   box-shadow: 0 6px 20px rgba(0,0,0,0.18);
   display: grid;
   gap: 0.3rem;
+}
+@media (max-width: 720px) {
+  .elev { right: 1rem; bottom: 80px; }
 }
 .elev-head {
   display: grid;
@@ -105,7 +111,7 @@ function onLeave() {
   font-size: 1.1rem; line-height: 1; color: var(--ink-faded);
 }
 .btn-icon-tiny:hover { color: var(--vermillion); }
-.elev-svg { width: 100%; height: 110px; display: block; }
+.elev-svg { width: 100%; height: 88px; display: block; }
 .area { fill: rgba(232, 93, 60, 0.15); }
 .line { fill: none; stroke: var(--vermillion); stroke-width: 1.6; }
 .cursor { stroke: var(--ink-faded); stroke-width: 1; stroke-dasharray: 3 3; }

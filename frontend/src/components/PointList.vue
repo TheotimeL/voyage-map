@@ -21,6 +21,7 @@
         </div>
         <div v-if="p.comment" class="comment">{{ p.comment }}</div>
         <div class="coord">
+          <template v-if="p._distKm != null"><span class="dist mono">{{ fmtDist(p._distKm) }}</span> · </template>
           {{ formatLat(p.lat) }} · {{ formatLng(p.lng) }}
         </div>
       </div>
@@ -45,6 +46,12 @@ function emojiFor(key) {
 function untitled(p) {
   const cat = CATEGORIES.find((c) => c.key === p.category)
   return cat ? cat.label : 'Untitled'
+}
+
+function fmtDist(km) {
+  if (km < 1) return `${Math.round(km * 1000)} m`
+  if (km < 10) return `${km.toFixed(1)} km`
+  return `${Math.round(km)} km`
 }
 
 // Trail-stats memo: parse each gpx_data once.
@@ -123,6 +130,7 @@ function trailStats(p) {
   overflow: hidden;
 }
 .coord { margin-top: 0.2rem; font-size: 0.78rem; }
+.dist { font-weight: 700; color: var(--vermillion); }
 .trail-stats {
   font-size: 0.76rem;
   color: var(--swatch, var(--ink-faded));

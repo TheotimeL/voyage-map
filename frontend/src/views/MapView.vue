@@ -292,8 +292,19 @@ const tripStats = computed(() => {
 
 const visiblePoints = computed(() => {
   if (!mapData.value) return []
-  if (hiddenCats.value.size === 0) return mapData.value.points
-  return mapData.value.points.filter((p) => !hiddenCats.value.has(p.category))
+  const filtered = hiddenCats.value.size === 0
+    ? mapData.value.points
+    : mapData.value.points.filter((p) => !hiddenCats.value.has(p.category))
+  // When the user has shared their location, sort by ascending distance —
+  // most relevant places first.
+  if (myLocation.value) {
+    const me = myLocation.value
+    return [...filtered].map((p) => ({
+      ...p,
+      _distKm: haversineKm({ lat: me.lat, lng: me.lng }, { lat: p.lat, lng: p.lng }),
+    })).sort((a, b) => a._distKm - b._distKm)
+  }
+  return filtered
 })
 
 watch(visiblePoints, (next) => {
@@ -317,10 +328,10 @@ watch(
 watch(activeTrailPointId, (next) => {
   for (const [id, line] of trackLines.entries()) {
     if (id === next) {
-      line.setStyle({ weight: 6 })
+      line.setStyle({ weight: 5, opacity: 1 })
       line.bringToFront()
     } else {
-      line.setStyle({ weight: 4 })
+      line.setStyle({ weight: 3, opacity: 0.55 })
     }
   }
 })
@@ -364,6 +375,7 @@ function attachTiles() {
 }
 const pointMarkers = new Map()
 const myDot = ref(false) // truthy when blue-dot is shown — used for button styling
+const myLocation = ref(null) // { lat, lng } when the user has shared their position
 let myDotMarker = null
 let myAccuracyCircle = null
 const trackLines = new Map() // track id → L.polyline
@@ -613,18 +625,18 @@ function onSelectPoint(p) {
 function renderTrack(track, idx) {
   try {
     const { coords } = parseGPX(track.gpx_data)
+    const isActive = activeTrailPointId.value === track.id
     const line = L.polyline(coords, {
       color: track.color || trackColor(idx),
-      weight: 4,
-      opacity: 0.9,
+      weight: isActive ? 5 : 3,
+      opacity: isActive ? 1 : (activeTrailPointId.value == null ? 0.85 : 0.5),
       lineCap: 'round',
       lineJoin: 'round',
       bubblingMouseEvents: false,
     }).addTo(leaflet)
-    line.on('mouseover', () => line.setStyle({ weight: 6 }))
+    line.on('mouseover', () => line.setStyle({ weight: 5 }))
     line.on('mouseout', () => {
-      // Don't drop the weight if this is the active trail.
-      line.setStyle({ weight: activeTrailPointId.value === track.id ? 6 : 4 })
+      line.setStyle({ weight: activeTrailPointId.value === track.id ? 5 : 3 })
     })
     line.on('click', (e) => {
       L.DomEvent.stopPropagation(e)
@@ -853,6 +865,7 @@ async function showMeOnMap() {
       myAccuracyCircle.setRadius(Math.max(loc.accuracy || 50, 30))
     }
     myDot.value = true
+    myLocation.value = { lat: loc.lat, lng: loc.lng }
     leaflet.flyTo(ll, Math.max(leaflet.getZoom(), 14), { duration: 0.6 })
   } catch (e) {
     locateError.value = e.message
@@ -866,6 +879,7 @@ async function markMyLocation() {
   locateError.value = ''
   try {
     const loc = await getMyLocation()
+    myLocation.value = { lat: loc.lat, lng: loc.lng }
     if (leaflet) leaflet.flyTo([loc.lat, loc.lng], 15, { duration: 0.6 })
     detail.value = null
     activeId.value = null
