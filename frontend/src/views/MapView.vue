@@ -195,7 +195,18 @@
           @go="onGoDay"
         />
       </template>
-      <template #more><p>More menu — coming in Task 9</p></template>
+      <template #more>
+        <MoreMenu
+          :fallback-lat="mapData.center_lat"
+          :fallback-lng="mapData.center_lng"
+          :get-bounds="getMapBounds"
+          :theme="theme"
+          :copied="copied"
+          @render-survival="renderSurvival"
+          @clear-survival="clearSurvival"
+          @copy-url="copyUrl"
+        />
+      </template>
     </InfoPanel>
 
     <div
@@ -299,6 +310,7 @@ import SurvivalLayer from '@/components/SurvivalLayer.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import ElevationProfile from '@/components/ElevationProfile.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
+import MoreMenu from '@/components/MoreMenu.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries } from '@/lib/elevation.js'
 
