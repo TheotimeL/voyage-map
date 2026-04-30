@@ -34,6 +34,8 @@ def add_point(slug: str, payload: PointIn, db: Session = Depends(get_db)):
         title=payload.title,
         comment=payload.comment,
         category=payload.category,
+        gpx_data=payload.gpx_data,
+        color=payload.color,
     )
     db.add(p)
     db.commit()
