@@ -71,6 +71,9 @@
       <div v-if="todayBanner" class="today-banner" @click="onGoDay(todayBanner.day)">
         <span class="banner-tag mono">{{ todayBanner.tag }}</span>
         <span class="banner-text">{{ todayBanner.text }}</span>
+        <span v-if="bannerWx" class="banner-wx mono">
+          {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
+        </span>
         <span v-if="todayBanner.sun" class="banner-sun mono">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
         <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
       </div>
@@ -167,6 +170,7 @@ import MapFab from '@/components/MapFab.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries } from '@/lib/elevation.js'
 import { rememberMap } from '@/lib/recents.js'
+import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -633,6 +637,17 @@ const todayBanner = computed(() => {
   return null
 })
 
+// Forecast for today's banner — populated lazily on day change.
+const bannerWx = ref(null)
+watch(
+  () => todayBanner.value?.day,
+  async (day) => {
+    if (!day || day.lat == null || day.lng == null) { bannerWx.value = null; return }
+    bannerWx.value = await dailyForecast(day.lat, day.lng, day.date)
+  },
+  { immediate: true },
+)
+
 async function onAddDay(payload) {
   try {
     const day = await api.addItineraryDay(props.slug, payload)
@@ -1014,6 +1029,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.04em;
 }
 .banner-sun { font-size: 0.78rem; color: var(--ink-soft); }
+.banner-wx { font-size: 0.82rem; color: var(--paper); font-weight: 600; }
 .banner-notes {
   font-family: var(--body);
   font-size: 0.85rem;
