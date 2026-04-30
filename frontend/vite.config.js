@@ -63,6 +63,26 @@ export default defineConfig({
             handler: 'StaleWhileRevalidate',
             options: { cacheName: 'google-fonts-styles' },
           },
+          {
+            // Nominatim geocoding — cache successful queries so locating works offline if user already searched once.
+            urlPattern: /^https:\/\/nominatim\.openstreetmap\.org\/.*$/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'nominatim',
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Overpass survival queries
+            urlPattern: /\/api\/overpass\b/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'overpass',
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 7 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
         ],
       },
     }),
