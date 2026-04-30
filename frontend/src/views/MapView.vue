@@ -3,9 +3,12 @@
     <aside class="sidebar paper" :class="{ open: sidebarOpen }">
       <div class="side-head">
         <router-link to="/" class="back">← Home</router-link>
-        <button class="btn-icon" @click="sidebarOpen = !sidebarOpen" :aria-label="sidebarOpen ? 'Collapse' : 'Expand'">
-          {{ sidebarOpen ? '⟨' : '⟩' }}
-        </button>
+        <div class="head-actions">
+          <ThemeToggle />
+          <button class="btn-icon" @click="sidebarOpen = !sidebarOpen" :aria-label="sidebarOpen ? 'Collapse' : 'Expand'">
+            {{ sidebarOpen ? '⟨' : '⟩' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="loading" class="loading">Charting…</div>
@@ -73,7 +76,7 @@
 
         <hr class="rule" />
         <p class="eyebrow">Offline cache</p>
-        <PrecacheButton :theme="'light'" />
+        <PrecacheButton :theme="theme" />
 
         <hr class="rule" />
         <SunPanel
@@ -198,6 +201,8 @@ import RadiusSlider from '@/components/RadiusSlider.vue'
 import CategoryFilters from '@/components/CategoryFilters.vue'
 import PrecacheButton from '@/components/PrecacheButton.vue'
 import SunPanel from '@/components/SunPanel.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import { theme } from '@/lib/theme.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -239,6 +244,8 @@ watch(
   { deep: true },
 )
 
+watch(theme, () => { if (leaflet) attachTiles() })
+
 function toggleCat(key) {
   const s = new Set(hiddenCats.value)
   if (s.has(key)) s.delete(key)
@@ -251,6 +258,19 @@ const mapEl = ref(null)
 let leaflet = null
 let centerMarker = null
 let circle = null
+let tileLayer = null
+function tileUrl() {
+  const style = theme.value === 'dark' ? 'dark_all' : 'light_all'
+  return `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`
+}
+function attachTiles() {
+  if (tileLayer) leaflet.removeLayer(tileLayer)
+  tileLayer = L.tileLayer(tileUrl(), {
+    attribution: '© OpenStreetMap © CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19,
+  }).addTo(leaflet)
+}
 const pointMarkers = new Map()
 const myDot = ref(false) // truthy when blue-dot is shown — used for button styling
 let myDotMarker = null
@@ -284,11 +304,7 @@ function initLeaflet() {
     zoomControl: true,
     attributionControl: true,
   })
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap © CARTO',
-    subdomains: 'abcd',
-    maxZoom: 19,
-  }).addTo(leaflet)
+  attachTiles()
 
   const center = [mapData.value.center_lat, mapData.value.center_lng]
   leaflet.setView(center, zoomForRadius(mapData.value.radius_m))
@@ -829,6 +845,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
 }
+.head-actions { display: inline-flex; gap: 0.4rem; align-items: center; }
 .back {
   font-family: var(--mono);
   font-size: 0.78rem;
