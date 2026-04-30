@@ -98,7 +98,12 @@ function onLeave() {
   gap: 0.3rem;
 }
 @media (max-width: 720px) {
-  .elev { right: 1rem; bottom: 80px; }
+  .elev {
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(8% + 0.5rem); /* sit just above the sheet's peek state */
+    z-index: 820;              /* above the sheet (800) so it doesn't get hidden */
+  }
 }
 .elev-head {
   display: grid;
