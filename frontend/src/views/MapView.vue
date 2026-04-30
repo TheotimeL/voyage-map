@@ -29,7 +29,6 @@
 
       <template #places>
         <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
-        <button class="btn btn-tiny" @click="startNewPin">+ Drop</button>
         <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
           ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
         </button>
@@ -91,6 +90,8 @@
       >
         <span class="locate-glyph">⌖</span>
       </button>
+
+      <MapFab glyph="+" title="Drop a pin" @click="startNewPin" />
 
       <Transition name="fade">
         <div v-if="gpxDragging" class="dropzone">
@@ -165,6 +166,7 @@ import CategoryFilters from '@/components/CategoryFilters.vue'
 import ElevationProfile from '@/components/ElevationProfile.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
+import MapFab from '@/components/MapFab.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries } from '@/lib/elevation.js'
 
@@ -906,7 +908,7 @@ onBeforeUnmount(() => {
 /* Floating "show me" map control */
 .locate-me {
   position: absolute;
-  bottom: 1.4rem;
+  bottom: 80px;
   right: 1.2rem;
   z-index: 700;
   width: 44px;
