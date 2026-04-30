@@ -20,3 +20,4 @@ frontend/.vite/
 /*.png
 
 .superpowers/
+.worktrees/
