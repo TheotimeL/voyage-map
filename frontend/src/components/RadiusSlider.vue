@@ -93,13 +93,14 @@ function formatRadius(m, compact = false) {
 .tick-btn {
   font-family: var(--mono);
   font-size: 0.72rem;
+  font-weight: 500;
   background: transparent;
-  border: 1px solid var(--ink-faded);
-  border-radius: 2px;
-  padding: 0.18rem 0.45rem;
-  color: var(--ink-soft);
+  border: 1.25px solid var(--ink);
+  border-radius: 3px;
+  padding: 0.22rem 0.5rem;
+  color: var(--ink);
   cursor: pointer;
   transition: all 90ms ease;
 }
-.tick-btn:hover { color: var(--oxblood); border-color: var(--oxblood); }
+.tick-btn:hover { background: var(--ink); color: var(--paper); }
 </style>

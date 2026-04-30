@@ -100,8 +100,8 @@ function onBlur() {
   list-style: none;
   margin: 0; padding: 0.3rem 0;
   background: var(--paper);
-  border: 1px solid var(--ink-faded);
-  border-radius: 2px;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
   box-shadow: 0 14px 30px -10px rgba(40, 20, 0, 0.3);
   max-height: 260px;
   overflow-y: auto;
@@ -116,7 +116,7 @@ function onBlur() {
   align-items: baseline;
 }
 .results li.sel,
-.results li:hover { background: rgba(184, 138, 74, 0.18); }
-.r-name { font-family: var(--serif-display); color: var(--ink); }
+.results li:hover { background: var(--cream); }
+.r-name { font-family: var(--display); color: var(--ink); }
 .r-rest { font-size: 0.82rem; color: var(--ink-faded); }
 </style>

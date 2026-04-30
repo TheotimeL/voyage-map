@@ -33,6 +33,10 @@
 
         <p class="eyebrow tight">Add a place</p>
         <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
+        <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
+          ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
+        </button>
+        <p v-if="locateError" class="error sm">{{ locateError }}</p>
 
         <hr class="rule" />
 
@@ -59,6 +63,17 @@
     <div class="map-wrap">
       <div ref="mapEl" class="map"></div>
 
+      <button
+        class="locate-me"
+        type="button"
+        :class="{ on: myDot }"
+        :disabled="locating"
+        :title="myDot ? 'Re-centre on me' : 'Show me on the map'"
+        @click="showMeOnMap"
+      >
+        <span class="locate-glyph">⌖</span>
+      </button>
+
       <PointDetailCard
         v-if="detail && !modal"
         :point="detail"
@@ -82,7 +97,7 @@
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import { api } from '@/api.js'
-import { CATEGORIES, formatLat, formatLng } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, getMyLocation } from '@/util.js'
 import PointList from '@/components/PointList.vue'
 import PointFormModal from '@/components/PointFormModal.vue'
 import PointDetailCard from '@/components/PointDetailCard.vue'
@@ -103,12 +118,17 @@ const activeId = ref(null)
 const modal = ref(null)
 const detail = ref(null)
 const copied = ref(false)
+const locating = ref(false)
+const locateError = ref('')
 
 const mapEl = ref(null)
 let leaflet = null
 let centerMarker = null
 let circle = null
 const pointMarkers = new Map()
+const myDot = ref(false) // truthy when blue-dot is shown — used for button styling
+let myDotMarker = null
+let myAccuracyCircle = null
 
 const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
 
@@ -132,8 +152,9 @@ function initLeaflet() {
     zoomControl: true,
     attributionControl: true,
   })
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap',
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    subdomains: 'abcd',
     maxZoom: 19,
   }).addTo(leaflet)
 
@@ -142,11 +163,11 @@ function initLeaflet() {
 
   circle = L.circle(center, {
     radius: mapData.value.radius_m,
-    color: '#8b3a3a',
-    weight: 2,
-    fillColor: '#b88a4a',
-    fillOpacity: 0.10,
-    dashArray: '4 6',
+    color: '#e85d3c',
+    weight: 2.5,
+    fillColor: '#e85d3c',
+    fillOpacity: 0.07,
+    dashArray: '6 6',
     interactive: false,
   }).addTo(leaflet)
 
@@ -170,17 +191,9 @@ function initLeaflet() {
     }
   })
 
-  leaflet.on('click', (e) => {
-    // Empty-map click = explicit intent to add a new pin here.
-    detail.value = null
-    activeId.value = null
-    modal.value = {
-      lat: e.latlng.lat,
-      lng: e.latlng.lng,
-      title: '',
-      comment: '',
-      category: 'note',
-    }
+  leaflet.on('click', () => {
+    // Empty-map click only dismisses an open detail card — no implicit pin drop.
+    if (detail.value) closeDetail()
   })
 
   mapData.value.points.forEach(addPointMarker)
@@ -190,8 +203,8 @@ function makePinIcon(glyph, extra = '') {
   return L.divIcon({
     className: `pin-wrapper ${extra}`,
     html: `<div class="pin"><span>${glyph}</span></div>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 36],
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
   })
 }
 
@@ -261,6 +274,68 @@ function startNewPin() {
 
 function onSelectPoint(p) {
   openDetail(p)
+}
+
+async function showMeOnMap() {
+  if (!leaflet) return
+  locating.value = true
+  locateError.value = ''
+  try {
+    const loc = await getMyLocation()
+    const ll = [loc.lat, loc.lng]
+    if (!myDotMarker) {
+      myDotMarker = L.marker(ll, {
+        icon: L.divIcon({
+          className: 'me-wrapper',
+          html: '<div class="me-dot"></div>',
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        }),
+        interactive: false,
+        zIndexOffset: 1000,
+      }).addTo(leaflet)
+      myAccuracyCircle = L.circle(ll, {
+        radius: Math.max(loc.accuracy || 50, 30),
+        color: '#3b82f6',
+        weight: 1,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.1,
+        interactive: false,
+      }).addTo(leaflet)
+    } else {
+      myDotMarker.setLatLng(ll)
+      myAccuracyCircle.setLatLng(ll)
+      myAccuracyCircle.setRadius(Math.max(loc.accuracy || 50, 30))
+    }
+    myDot.value = true
+    leaflet.flyTo(ll, Math.max(leaflet.getZoom(), 14), { duration: 0.6 })
+  } catch (e) {
+    locateError.value = e.message
+  } finally {
+    locating.value = false
+  }
+}
+
+async function markMyLocation() {
+  locating.value = true
+  locateError.value = ''
+  try {
+    const loc = await getMyLocation()
+    if (leaflet) leaflet.flyTo([loc.lat, loc.lng], 15, { duration: 0.6 })
+    detail.value = null
+    activeId.value = null
+    modal.value = {
+      lat: loc.lat,
+      lng: loc.lng,
+      title: 'You are here',
+      comment: '',
+      category: 'note',
+    }
+  } catch (e) {
+    locateError.value = e.message
+  } finally {
+    locating.value = false
+  }
 }
 
 function onSearchPick(r) {
@@ -378,13 +453,13 @@ onBeforeUnmount(() => {
 .map {
   width: 100%;
   height: 100%;
-  background: var(--paper-deep);
+  background: var(--cream-deep);
 }
 .sidebar {
   width: 360px;
   max-width: 86vw;
   height: 100%;
-  border-right: 1px solid var(--paper-edge);
+  border-right: 1px solid var(--cream-edge);
   border-top: none;
   border-bottom: none;
   border-left: none;
@@ -417,18 +492,18 @@ onBeforeUnmount(() => {
   color: var(--ink-soft);
   border-bottom: none;
 }
-.back:hover { color: var(--oxblood); }
+.back:hover { color: var(--vermillion); }
 .btn-icon {
   background: transparent;
   border: 1px solid var(--ink-faded);
   border-radius: 2px;
   width: 2rem; height: 2rem;
   display: grid; place-items: center;
-  font-family: var(--serif-display);
+  font-family: var(--display);
   color: var(--ink-soft);
   cursor: pointer;
 }
-.btn-icon:hover { color: var(--oxblood); border-color: var(--oxblood); }
+.btn-icon:hover { color: var(--vermillion); border-color: var(--vermillion); }
 
 .loading, .error {
   padding: 2rem 0;
@@ -436,11 +511,11 @@ onBeforeUnmount(() => {
   color: var(--ink-faded);
   text-align: center;
 }
-.error { color: var(--oxblood-deep); }
+.error { color: var(--vermillion-deep); }
 
 .title { margin: 0; }
 .title-input {
-  font-family: var(--serif-display);
+  font-family: var(--display);
   font-size: 1.7rem;
   color: var(--ink);
   background: transparent;
@@ -456,7 +531,7 @@ onBeforeUnmount(() => {
 .meta { margin: 0.2rem 0 0.4rem; font-size: 0.85rem; line-height: 1.55; }
 .rule {
   border: none;
-  border-top: 1px solid var(--paper-edge);
+  border-top: 1px solid var(--cream-edge);
   margin: 0.4rem 0 0.2rem;
 }
 .list-head {
@@ -472,11 +547,53 @@ onBeforeUnmount(() => {
   color: var(--ink-faded);
 }
 .eyebrow.tight { margin: 0; }
+
+.locate-link {
+  background: transparent;
+  border: none;
+  padding: 0.1rem 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vermillion);
+  cursor: pointer;
+  justify-self: start;
+  margin-top: -0.2rem;
+}
+.locate-link:hover { color: var(--vermillion-deep); }
+.locate-link:disabled { color: var(--ink-faded); cursor: wait; }
+.error.sm { font-size: 0.82rem; margin: 0; }
+
+/* Floating "show me" map control */
+.locate-me {
+  position: absolute;
+  bottom: 1.4rem;
+  right: 1.2rem;
+  z-index: 700;
+  width: 44px;
+  height: 44px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 3px 0 var(--ink), 0 6px 12px rgba(0, 0, 0, 0.18);
+  transition: transform 80ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.locate-me:hover { background: var(--ink); color: var(--paper); }
+.locate-me:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+.locate-me:disabled { opacity: 0.5; cursor: wait; }
+.locate-me.on { background: #3b82f6; border-color: #1e40af; color: #fff; box-shadow: 0 3px 0 #1e40af, 0 6px 12px rgba(0,0,0,0.18); }
+.locate-me.on:hover { background: #1e40af; }
+.locate-glyph { font-size: 1.3rem; line-height: 1; font-weight: 700; }
 .share { margin-top: auto; padding-top: 0.6rem; display: grid; gap: 0.4rem; }
 
 @media (max-width: 720px) {
   .mapview { flex-direction: column-reverse; }
-  .sidebar { width: 100%; max-height: 50vh; border-right: none; border-top: 1px solid var(--paper-edge); }
+  .sidebar { width: 100%; max-height: 50vh; border-right: none; border-top: 1px solid var(--cream-edge); }
   .sidebar:not(.open) { max-height: 56px; }
 }
 </style>

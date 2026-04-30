@@ -32,13 +32,17 @@ export async function geocode(query) {
   const wait = Math.max(0, 800 - (now - lastGeocode))
   if (wait > 0) await new Promise((r) => setTimeout(r, wait))
   lastGeocode = Date.now()
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(query)}`
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=8&dedupe=1&q=${encodeURIComponent(query)}`
   const res = await fetch(url, { headers: { 'Accept-Language': navigator.language || 'en' } })
   if (!res.ok) return []
   const data = await res.json()
-  return data.map((d) => ({
-    label: d.display_name,
-    lat: parseFloat(d.lat),
-    lng: parseFloat(d.lon),
-  }))
+  return data
+    .map((d) => ({
+      label: d.display_name,
+      lat: parseFloat(d.lat),
+      lng: parseFloat(d.lon),
+      importance: parseFloat(d.importance) || 0,
+    }))
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, 6)
 }

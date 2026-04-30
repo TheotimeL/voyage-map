@@ -98,21 +98,21 @@ function submit() {
   gap: 0.4rem;
 }
 .cat {
-  background: rgba(255, 252, 240, 0.6);
-  border: 1px solid var(--ink-faded);
-  border-radius: 2px;
-  padding: 0.5rem 0.2rem;
+  background: var(--cream);
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  padding: 0.55rem 0.2rem;
   cursor: pointer;
   display: grid;
   gap: 0.2rem;
-  font-family: var(--serif-body);
+  font-family: var(--body);
   color: var(--ink-soft);
   transition: all 90ms ease;
 }
-.cat:hover { border-color: var(--oxblood); color: var(--ink); }
+.cat:hover { border-color: var(--vermillion); color: var(--ink); }
 .cat.active {
-  background: var(--oxblood);
-  border-color: var(--oxblood-deep);
+  background: var(--vermillion);
+  border-color: var(--vermillion-deep);
   color: var(--paper);
 }
 .cat-emoji { font-size: 1.2rem; }

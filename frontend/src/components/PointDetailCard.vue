@@ -51,17 +51,19 @@ const catLabel = computed(() => cat.value.label)
 }
 .close {
   position: absolute;
-  top: 0.3rem;
-  right: 0.5rem;
+  top: 0.4rem;
+  right: 0.6rem;
   background: transparent;
   border: none;
-  font-family: var(--serif-display);
+  font-family: var(--body);
   font-size: 1.4rem;
   line-height: 1;
   color: var(--ink-faded);
   cursor: pointer;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
 }
-.close:hover { color: var(--oxblood); }
+.close:hover { color: var(--ink); background: var(--cream); }
 
 .head { display: flex; gap: 0.7rem; align-items: center; }
 .badge {
@@ -69,19 +71,18 @@ const catLabel = computed(() => cat.value.label)
   height: 2.4rem;
   display: grid;
   place-items: center;
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   background: var(--paper);
-  border: 2px solid var(--oxblood);
-  border-radius: 50% 50% 50% 0;
-  transform: rotate(-45deg);
+  border: 2.5px solid var(--vermillion);
+  border-radius: 50%;
   flex-shrink: 0;
 }
-.badge > * { transform: rotate(45deg); }
 
 .title {
-  margin: 0.05rem 0 0;
-  font-size: 1.25rem;
-  line-height: 1.15;
+  margin: 0.1rem 0 0;
+  font-size: 1.35rem;
+  line-height: 1.05;
+  text-transform: uppercase;
 }
 
 .comment {
@@ -100,8 +101,8 @@ const catLabel = computed(() => cat.value.label)
   justify-content: flex-end;
   margin-top: 0.3rem;
 }
-.danger { color: var(--oxblood); border-color: var(--oxblood); }
-.danger:hover { background: var(--oxblood); color: var(--paper); }
+.danger { color: var(--vermillion); border-color: var(--vermillion); }
+.danger:hover { background: var(--vermillion); color: var(--paper); border-color: var(--vermillion); }
 
 @media (max-width: 720px) {
   .detail { top: auto; bottom: 1rem; right: 1rem; left: 1rem; width: auto; }

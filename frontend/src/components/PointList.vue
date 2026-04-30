@@ -50,7 +50,7 @@ function untitled(p) {
   gap: 0.4rem;
 }
 .empty {
-  font-family: var(--serif-body);
+  font-family: var(--body);
   color: var(--ink-faded);
   padding: 1rem 0.2rem;
 }
@@ -65,23 +65,23 @@ function untitled(p) {
   cursor: pointer;
   transition: background 90ms ease, border-color 90ms ease;
 }
-.point:hover { background: rgba(184, 138, 74, 0.12); border-color: var(--paper-edge); }
-.point.active { background: rgba(139, 58, 58, 0.13); border-color: var(--oxblood); }
+.point:hover { background: var(--cream); border-color: var(--cream-edge); }
+.point.active { background: var(--cream); border-color: var(--ink); }
 .pin-mini {
-  font-size: 1.1rem;
+  font-size: 1rem;
   width: 2rem;
   height: 2rem;
   display: grid;
   place-items: center;
   background: var(--paper);
-  border: 1.5px solid var(--oxblood);
-  border-radius: 50% 50% 50% 0;
-  transform: rotate(-45deg);
+  border: 2px solid var(--vermillion);
+  border-radius: 50%;
+  flex-shrink: 0;
 }
-.pin-mini > * { transform: rotate(45deg); }
 .title {
-  font-family: var(--serif-display);
-  font-size: 1.05rem;
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 1rem;
   color: var(--ink);
   line-height: 1.2;
 }
