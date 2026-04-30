@@ -314,6 +314,18 @@ watch(activeTrailPointId, (next) => {
   }
 })
 
+// Highlight the active point's marker (scale + ring) when it changes.
+watch(activeId, (next, prev) => {
+  if (prev != null) {
+    const prevM = pointMarkers.get(prev)
+    prevM?.getElement()?.classList.remove('is-active')
+  }
+  if (next != null) {
+    const nextM = pointMarkers.get(next)
+    nextM?.getElement()?.classList.add('is-active')
+  }
+})
+
 watch(theme, () => { if (leaflet) attachTiles() })
 
 function toggleCat(key) {

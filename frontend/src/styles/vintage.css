@@ -215,6 +215,15 @@ input[type="range"]::-moz-range-thumb {
   width: 38px; height: 38px;
 }
 
+/* When the row is active, pop the matching pin: scale + ink ring */
+.pin-wrapper.is-active .pin {
+  transform: translateY(-2px) scale(1.15);
+  border-color: var(--ink);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--vermillion);
+  z-index: 1000;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
 /* Itinerary day marker — small numbered chip */
 .iti-pin {
   width: 30px;
