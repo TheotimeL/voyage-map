@@ -18,6 +18,7 @@
           :class="{ today: isToday(d.date), past: isPast(d.date), future: isFuture(d.date) }"
         >
           <div class="iti-date" :title="d.date">
+            <span class="d-dow mono">{{ shortDow(d.date) }}</span>
             <span class="d-num">{{ shortDay(d.date) }}</span>
             <span class="d-mon mono">{{ shortMonth(d.date) }}</span>
           </div>
@@ -129,6 +130,12 @@ function shortMonth(iso) {
   const m = parseInt(iso.slice(5, 7), 10) - 1
   return ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][m] || ''
 }
+function shortDow(iso) {
+  // Build a UTC date so the weekday isn't off-by-one in negative-offset zones.
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][dt.getUTCDay()] || ''
+}
 
 function daysUntil(iso) {
   const a = new Date(today.value), b = new Date(iso)
@@ -225,8 +232,10 @@ function legKm(a, b) {
   text-align: center;
   line-height: 1;
 }
+.d-dow { font-size: 0.55rem; letter-spacing: 0.18em; color: var(--ink-faded); margin-bottom: -0.05rem; }
 .d-num { font-family: var(--display); font-size: 1.3rem; }
 .d-mon { font-size: 0.62rem; letter-spacing: 0.16em; color: var(--ink-faded); }
+.iti-day.today .d-dow { color: rgba(255,255,255,0.6); }
 
 .iti-body { min-width: 0; }
 .iti-label {
