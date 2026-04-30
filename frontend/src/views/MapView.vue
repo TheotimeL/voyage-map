@@ -179,8 +179,8 @@
         <CategoryFilters :points="mapData.points" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
         <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
         <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
-        <p class="hint mono">Drop a .gpx anywhere on the map.</p>
-        <label class="btn btn-tiny gpx-pick v2-gpx">
+        <p v-if="!trailPoints.length" class="hint mono">Drop a .gpx anywhere on the map.</p>
+        <label class="btn btn-tiny gpx-pick">
           + GPX
           <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
         </label>
