@@ -166,6 +166,7 @@ import MoreMenu from '@/components/MoreMenu.vue'
 import MapFab from '@/components/MapFab.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries } from '@/lib/elevation.js'
+import { rememberMap } from '@/lib/recents.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -323,6 +324,7 @@ onMounted(async () => {
     const m = await api.getMap(props.slug)
     mapData.value = m
     titleDraft.value = m.title || ''
+    rememberMap(m.slug, m.title)
     loading.value = false
     await nextTick()
     initLeaflet()

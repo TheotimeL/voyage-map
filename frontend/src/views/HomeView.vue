@@ -26,6 +26,19 @@
       </div>
     </section>
 
+    <section v-if="recents.length" class="recents">
+      <p class="eyebrow lbl">Resume a voyage</p>
+      <ul class="recents-list">
+        <li v-for="r in recents" :key="r.slug" class="recent-card">
+          <router-link :to="{ name: 'map', params: { slug: r.slug } }" class="recent-link">
+            <span class="recent-title">{{ r.title || 'Untitled voyage' }}</span>
+            <span class="recent-meta mono">{{ relTime(r.visitedAt) }} · /m/{{ r.slug }}</span>
+          </router-link>
+          <button class="recent-forget" type="button" :title="`Remove ${r.title || 'voyage'} from this list`" @click="forget(r.slug)">×</button>
+        </li>
+      </ul>
+    </section>
+
     <section class="form">
       <label class="eyebrow lbl">01 · Where to?</label>
       <GeocoderSearch
@@ -71,6 +84,7 @@ import { useRouter } from 'vue-router'
 import L from 'leaflet'
 import { api } from '@/api.js'
 import { getMyLocation } from '@/util.js'
+import { recentMaps, rememberMap, forgetMap } from '@/lib/recents.js'
 import CompassRose from '@/components/CompassRose.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
 
@@ -83,6 +97,27 @@ const creating = ref(false)
 const error = ref('')
 const locating = ref(false)
 const locateError = ref('')
+const recents = ref(recentMaps())
+
+function relTime(iso) {
+  if (!iso) return ''
+  const ms = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(ms / 60_000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 7) return `${d}d ago`
+  const w = Math.floor(d / 7)
+  if (w < 5) return `${w}w ago`
+  return new Date(iso).toLocaleDateString()
+}
+
+function forget(slug) {
+  forgetMap(slug)
+  recents.value = recentMaps()
+}
 
 const mapEl = ref(null)
 let map = null
@@ -149,6 +184,7 @@ async function create() {
       center_lng: picked.value.lng,
       radius_m: 50000,
     })
+    rememberMap(m.slug, m.title)
     router.push({ name: 'map', params: { slug: m.slug } })
   } catch (e) {
     error.value = e.message || 'Could not chart your map.'
@@ -223,6 +259,58 @@ h1 { margin: 0.5rem 0 1rem; }
   margin: 0;
 }
 .hero-mark { display: grid; place-items: center; padding: 0.5rem; }
+
+/* Recents -------------------------------------------------------- */
+.recents { margin-bottom: 1.4rem; }
+.recents .lbl { margin-bottom: 0.5rem; display: block; }
+.recents-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+.recent-card {
+  display: flex;
+  align-items: stretch;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  overflow: hidden;
+  transition: transform 80ms ease, box-shadow 120ms ease;
+}
+.recent-card:hover { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--ink); }
+.recent-link {
+  flex: 1;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.7rem 0.8rem;
+  color: var(--ink);
+  text-decoration: none;
+  min-width: 0;
+}
+.recent-title {
+  font-family: var(--display);
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-meta { font-size: 0.7rem; color: var(--ink-faded); letter-spacing: 0.08em; }
+.recent-forget {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.6rem;
+  border-left: 1px dashed var(--cream-edge);
+}
+.recent-forget:hover { color: var(--vermillion); background: var(--cream); }
 
 /* Form ----------------------------------------------------------- */
 .form {
