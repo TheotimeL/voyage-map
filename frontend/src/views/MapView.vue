@@ -186,7 +186,15 @@
         </label>
       </template>
 
-      <template #itinerary><p>Itinerary tab — coming in Task 8</p></template>
+      <template #itinerary>
+        <Itinerary
+          :days="mapData.itinerary || []"
+          @add="onAddDay"
+          @add-bulk="onAddBulk"
+          @delete="onDeleteDay"
+          @go="onGoDay"
+        />
+      </template>
       <template #more><p>More menu — coming in Task 9</p></template>
     </InfoPanel>
 
