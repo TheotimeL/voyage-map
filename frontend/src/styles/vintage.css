@@ -233,6 +233,27 @@ input[type="range"]::-moz-range-thumb {
 }
 .iti-pin:hover { background: var(--vermillion); }
 
+/* Itinerary day label tooltip on the map */
+.leaflet-tooltip.iti-tip {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+}
+.leaflet-tooltip.iti-tip::before { display: none; }
+[data-theme="dark"] .leaflet-tooltip.iti-tip {
+  background: rgba(20, 23, 26, 0.95);
+  color: var(--ink);
+  border-color: var(--cream-edge);
+}
+
 /* Today: vermillion fill + concentric pulse so the active stop reads at a glance. */
 .iti-pin-wrapper.is-today .iti-pin {
   background: var(--vermillion);

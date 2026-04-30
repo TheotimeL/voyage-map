@@ -448,6 +448,14 @@ function renderItinerary() {
       zIndexOffset: 600,
       draggable: true,
     }).addTo(leaflet)
+    if (d.label) {
+      m.bindTooltip(d.label, {
+        permanent: true,
+        direction: 'right',
+        offset: [10, 0],
+        className: 'iti-tip',
+      })
+    }
     m.on('click', () => onGoDay(d))
     m.on('dragend', async (e) => {
       const ll = e.target.getLatLng()
