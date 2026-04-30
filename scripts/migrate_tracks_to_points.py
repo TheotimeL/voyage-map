@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from sqlalchemy import select
 
 from services.db import SessionLocal
-from services.models import Map, Point, Track
+from services.models import Point, Track
 
 
 def first_coord(gpx_data: str) -> tuple[float, float] | None:
