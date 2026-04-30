@@ -17,15 +17,23 @@ export function parseGPX(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, 'application/xml')
   if (doc.querySelector('parsererror')) throw new Error('Could not parse GPX file.')
 
-  const collect = (sel) =>
-    Array.from(doc.querySelectorAll(sel))
-      .map((pt) => [parseFloat(pt.getAttribute('lat')), parseFloat(pt.getAttribute('lon'))])
-      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b))
+  const collect = (sel) => {
+    const out = { coords: [], elevations: [] }
+    for (const pt of doc.querySelectorAll(sel)) {
+      const lat = parseFloat(pt.getAttribute('lat'))
+      const lng = parseFloat(pt.getAttribute('lon'))
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+      out.coords.push([lat, lng])
+      const ele = parseFloat(pt.querySelector('ele')?.textContent ?? '')
+      out.elevations.push(Number.isFinite(ele) ? ele : null)
+    }
+    return out
+  }
 
-  let coords = collect('trkpt')
-  if (coords.length === 0) coords = collect('rtept')
-  if (coords.length === 0) coords = collect('wpt')
-  if (coords.length === 0) throw new Error('No track or route points found in GPX.')
+  let parsed = collect('trkpt')
+  if (!parsed.coords.length) parsed = collect('rtept')
+  if (!parsed.coords.length) parsed = collect('wpt')
+  if (!parsed.coords.length) throw new Error('No track or route points found in GPX.')
 
   const name =
     doc.querySelector('trk > name')?.textContent?.trim() ||
@@ -33,7 +41,7 @@ export function parseGPX(xmlText) {
     doc.querySelector('metadata > name')?.textContent?.trim() ||
     null
 
-  return { coords, name }
+  return { coords: parsed.coords, elevations: parsed.elevations, name }
 }
 
 export const TRACK_PALETTE = ['#0a4d5b', '#5e6b3b', '#6b3a5a', '#1f3851', '#a85a2b', '#3b6b8a']
