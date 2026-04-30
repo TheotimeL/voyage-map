@@ -95,10 +95,13 @@
         </div>
         <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
         <ul v-if="mapData.tracks && mapData.tracks.length" class="track-list">
-          <li v-for="(t, i) in mapData.tracks" :key="t.id" class="track-row">
+          <li v-for="(t, i) in mapData.tracks" :key="t.id"
+              class="track-row"
+              :class="{ active: activeTrackId === t.id }"
+              @click="activeTrackId = activeTrackId === t.id ? null : t.id">
             <span class="track-swatch" :style="{ background: t.color || trackColor(i) }"></span>
             <span class="track-name">{{ t.name || `Track ${i + 1}` }}</span>
-            <button class="track-del" type="button" :title="`Delete ${t.name || 'track'}`" @click="deleteTrack(t.id)">×</button>
+            <button class="track-del" type="button" :title="`Delete ${t.name || 'track'}`" @click.stop="deleteTrack(t.id)">×</button>
           </li>
         </ul>
         <p v-else class="hint mono">Drop a .gpx anywhere on the map.</p>
@@ -153,6 +156,14 @@
         @delete="onDeleteDetail"
         @close="closeDetail"
       />
+
+      <ElevationProfile
+        v-if="activeSeries.length"
+        :series="activeSeries"
+        :name="activeTrackName"
+        @hover="onElevHover"
+        @close="activeTrackId = null"
+      />
     </div>
 
     <PointFormModal
@@ -202,7 +213,9 @@ import CategoryFilters from '@/components/CategoryFilters.vue'
 import PrecacheButton from '@/components/PrecacheButton.vue'
 import SunPanel from '@/components/SunPanel.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import ElevationProfile from '@/components/ElevationProfile.vue'
 import { theme } from '@/lib/theme.js'
+import { buildElevationSeries } from '@/lib/elevation.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -221,6 +234,34 @@ const copied = ref(false)
 const locating = ref(false)
 const locateError = ref('')
 const hiddenCats = ref(new Set())
+const activeTrackId = ref(null)
+const activeSeries = computed(() => {
+  if (!activeTrackId.value || !mapData.value) return []
+  const t = mapData.value.tracks?.find((x) => x.id === activeTrackId.value)
+  if (!t) return []
+  const { coords, elevations } = parseGPX(t.gpx_data)
+  return buildElevationSeries(coords, elevations)
+})
+const activeTrackName = computed(() => {
+  const t = mapData.value?.tracks?.find((x) => x.id === activeTrackId.value)
+  return t?.name || ''
+})
+
+let hoverMarker = null
+function onElevHover(coord) {
+  if (!leaflet) return
+  if (!coord) {
+    if (hoverMarker) { leaflet.removeLayer(hoverMarker); hoverMarker = null }
+    return
+  }
+  if (!hoverMarker) {
+    hoverMarker = L.circleMarker(coord, {
+      radius: 6, color: '#e85d3c', weight: 2, fillColor: '#fff', fillOpacity: 1,
+    }).addTo(leaflet)
+  } else {
+    hoverMarker.setLatLng(coord)
+  }
+}
 
 const visiblePoints = computed(() => {
   if (!mapData.value) return []
@@ -983,6 +1024,8 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 }
 .track-row:hover { background: var(--cream); border-color: var(--cream-edge); }
+.track-row.active { background: var(--cream); border-color: var(--vermillion); }
+.track-row { cursor: pointer; }
 .track-swatch {
   width: 14px;
   height: 14px;
