@@ -367,6 +367,12 @@ onMounted(async () => {
     loading.value = false
     await nextTick()
     initLeaflet()
+
+    const today = todayISO()
+    const day = (mapData.value.itinerary || []).find((d) => d.date === today)
+    if (day && day.lat != null && day.lng != null && leaflet) {
+      leaflet.setView([day.lat, day.lng], 11)
+    }
   } catch (e) {
     error.value = 'This map could not be found.'
     loading.value = false
@@ -638,9 +644,11 @@ const todayBanner = computed(() => {
   }
   const future = sorted.find((d) => d.date > t)
   if (future) {
-    const days = Math.round((new Date(future.date) - new Date(t)) / 86400000)
+    const ms = new Date(future.date) - new Date(t)
+    const days = Math.floor(ms / 86400000)
+    const tag = days >= 1 ? `T-${days}d` : `T-<1d`
     return {
-      tag: `T-${days}`,
+      tag,
       text: `Next: ${(future.label || 'Untitled').toUpperCase()}`,
       notes: future.notes || null,
       day: future,
