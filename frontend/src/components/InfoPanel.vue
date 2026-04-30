@@ -1,29 +1,27 @@
 <template>
-  <DesktopDock v-model:collapsed="collapsed">
-    <header class="dock-head">
-      <slot name="header" />
-    </header>
+  <DesktopDock v-if="!isMobile" v-model:collapsed="collapsed">
+    <header class="dock-head"><slot name="header" /></header>
     <TabBar :tabs="tabs" :active="active" @update:active="(k) => emit('update:active', k)" />
-    <div class="tab-content">
-      <slot :name="active" />
-    </div>
+    <div class="tab-content"><slot :name="active" /></div>
     <template #rail>
-      <button
-        v-for="t in tabs"
-        :key="t.key"
-        type="button"
-        class="rail-icon"
-        :class="{ active: t.key === active }"
-        :title="t.label"
-        @click="rail(t.key)"
-      >{{ t.icon }}</button>
+      <button v-for="t in tabs" :key="t.key" type="button" class="rail-icon"
+              :class="{ active: t.key === active }" :title="t.label" @click="rail(t.key)">{{ t.icon }}</button>
     </template>
   </DesktopDock>
+
+  <MobileSheet v-else>
+    <template #tabs>
+      <TabBar :tabs="tabs" :active="active" @update:active="(k) => emit('update:active', k)" />
+    </template>
+    <header class="sheet-head"><slot name="header" /></header>
+    <div><slot :name="active" /></div>
+  </MobileSheet>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import DesktopDock from './DesktopDock.vue'
+import MobileSheet from './MobileSheet.vue'
 import TabBar from './TabBar.vue'
 
 const props = defineProps({
@@ -32,7 +30,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:active'])
 
+const mq = window.matchMedia('(max-width: 720px)')
+const isMobile = ref(mq.matches)
 const collapsed = ref(false)
+function onMQ(e) { isMobile.value = e.matches }
+onMounted(() => mq.addEventListener('change', onMQ))
+onUnmounted(() => mq.removeEventListener('change', onMQ))
+
 function rail(key) {
   emit('update:active', key)
   collapsed.value = false
@@ -40,7 +44,7 @@ function rail(key) {
 </script>
 
 <style scoped>
-.dock-head {
+.dock-head, .sheet-head {
   padding: 0.9rem 1rem 0.7rem;
   border-bottom: 1px solid var(--cream-edge);
   display: flex;
@@ -49,12 +53,8 @@ function rail(key) {
 }
 .tab-content { flex: 1; overflow-y: auto; padding: 0.9rem 1rem 1rem; }
 .rail-icon {
-  background: transparent;
-  border: 1px solid transparent;
-  font-size: 1.2rem;
-  padding: 0.5rem;
-  cursor: pointer;
-  border-radius: 3px;
+  background: transparent; border: 1px solid transparent;
+  font-size: 1.2rem; padding: 0.5rem; cursor: pointer; border-radius: 3px;
 }
 .rail-icon:hover { background: var(--cream); border-color: var(--cream-edge); }
 .rail-icon.active { background: var(--cream); border-color: var(--vermillion); }
