@@ -2,8 +2,8 @@
   <section v-if="info" class="sun-panel">
     <p class="anchor mono">
       <span v-if="gotPosition">⌖ your location</span>
-      <span v-else-if="placeName">📍 near {{ placeName }}</span>
-      <span v-else>📍 {{ fmtCoord(lat) }} · {{ fmtCoord(lng, 'lng') }}</span>
+      <span v-else-if="resolvedName">📍 near {{ resolvedName }}</span>
+      <span v-else class="muted">locating area…</span>
     </p>
     <ul class="sun-rows">
       <li>
@@ -31,9 +31,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { sunInfo, formatTime, formatCountdown } from '@/lib/sun.js'
 import { getMyLocation } from '@/util.js'
+import { reverseGeocode } from '@/api.js'
 
 const props = defineProps({
   fallbackLat: { type: Number, required: true },
@@ -41,9 +42,14 @@ const props = defineProps({
   placeName: { type: String, default: '' },
 })
 
-function fmtCoord(v, kind = 'lat') {
-  const hemi = kind === 'lng' ? (v >= 0 ? 'E' : 'W') : (v >= 0 ? 'N' : 'S')
-  return `${Math.abs(v).toFixed(2)}° ${hemi}`
+// "near X": prefer the supplied placeName (today's day label, map title);
+// otherwise reverse-geocode the lat/lng once.
+const resolved = ref('')
+const resolvedName = computed(() => props.placeName || resolved.value)
+async function resolveCurrent() {
+  if (props.placeName) { resolved.value = ''; return }
+  const name = await reverseGeocode(lat.value, lng.value)
+  if (name) resolved.value = name
 }
 
 const lat = ref(props.fallbackLat)
@@ -71,8 +77,10 @@ async function locateMe() {
 
 onMounted(() => {
   tickHandle.value = setInterval(() => { now.value = new Date() }, 30_000)
+  resolveCurrent()
 })
 onBeforeUnmount(() => { clearInterval(tickHandle.value) })
+watch([lat, lng, () => props.placeName], () => resolveCurrent())
 </script>
 
 <style scoped>
@@ -84,6 +92,7 @@ onBeforeUnmount(() => { clearInterval(tickHandle.value) })
   text-transform: uppercase;
   color: var(--ink-faded);
 }
+.anchor .muted { opacity: 0.6; }
 .sun-rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.2rem; }
 .sun-rows li {
   display: grid;

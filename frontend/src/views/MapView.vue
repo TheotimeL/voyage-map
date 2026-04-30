@@ -62,7 +62,7 @@
           :theme="theme"
           :copied="copied"
           :stats="tripStats"
-          :place-name="todayBanner?.day?.label || mapData.title || ''"
+          :place-name="todayBanner?.day?.label || ''"
           @render-survival="renderSurvival"
           @clear-survival="clearSurvival"
           @copy-url="copyUrl"

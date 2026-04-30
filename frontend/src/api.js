@@ -29,6 +29,27 @@ export const api = {
   clearItinerary: (slug) => request('DELETE', `/maps/${slug}/itinerary`),
 }
 
+// Reverse geocoding cache: round to 0.1° (~10km) and remember the resolved
+// short label so we don't hammer Nominatim on every map change.
+const reverseCache = new Map()
+export async function reverseGeocode(lat, lng) {
+  const key = `${lat.toFixed(1)},${lng.toFixed(1)}`
+  if (reverseCache.has(key)) return reverseCache.get(key)
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${lat}&lon=${lng}`
+    const res = await fetch(url, { headers: { 'Accept-Language': navigator.language || 'en' } })
+    if (!res.ok) throw new Error('reverse ' + res.status)
+    const d = await res.json()
+    const a = d.address || {}
+    const city = a.city || a.town || a.village || a.hamlet || a.county || a.state || a.country || null
+    reverseCache.set(key, city)
+    return city
+  } catch {
+    reverseCache.set(key, null)
+    return null
+  }
+}
+
 // Nominatim geocoding (free OSM service). Throttle to be polite.
 let lastGeocode = 0
 export async function geocode(query) {
