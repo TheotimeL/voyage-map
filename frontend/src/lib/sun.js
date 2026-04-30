@@ -13,9 +13,18 @@ export function sunInfo(lat, lng, when = new Date()) {
   }
 }
 
-export function formatTime(d) {
+// Format an absolute Date as HH:MM. When `lng` is provided, the time is shown
+// in the mean solar time at that longitude — useful when the user is browsing
+// from a different timezone (e.g., planning a US trip from Europe).
+export function formatTime(d, lng) {
   if (!(d instanceof Date) || Number.isNaN(d.valueOf())) return '—'
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (lng == null) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const utcMin = d.getUTCHours() * 60 + d.getUTCMinutes()
+  const offsetMin = Math.round(lng / 15) * 60
+  const total = ((utcMin + offsetMin) % 1440 + 1440) % 1440
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 export function formatCountdown(ms) {

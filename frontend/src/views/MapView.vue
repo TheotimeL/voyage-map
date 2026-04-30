@@ -243,6 +243,19 @@ watch(
   { deep: true },
 )
 
+// Highlight the active trail polyline (thicken + bring to front) and reset
+// the others.
+watch(activeTrailPointId, (next) => {
+  for (const [id, line] of trackLines.entries()) {
+    if (id === next) {
+      line.setStyle({ weight: 6 })
+      line.bringToFront()
+    } else {
+      line.setStyle({ weight: 4 })
+    }
+  }
+})
+
 watch(theme, () => { if (leaflet) attachTiles() })
 
 function toggleCat(key) {
@@ -480,7 +493,10 @@ function renderTrack(track, idx) {
       bubblingMouseEvents: false,
     }).addTo(leaflet)
     line.on('mouseover', () => line.setStyle({ weight: 6 }))
-    line.on('mouseout', () => line.setStyle({ weight: 4 }))
+    line.on('mouseout', () => {
+      // Don't drop the weight if this is the active trail.
+      line.setStyle({ weight: activeTrailPointId.value === track.id ? 6 : 4 })
+    })
     line.on('click', (e) => {
       L.DomEvent.stopPropagation(e)
       activeTrailPointId.value = activeTrailPointId.value === track.id ? null : track.id
@@ -547,8 +563,16 @@ async function importGpxFile(file) {
 // Itinerary -----------------------------------------------------------
 const today = computed(() => todayISO())
 
-function fmtHM(d) {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+// Format an absolute Date as HH:MM in the local civil time at the given
+// longitude — mean solar time approximation, accurate enough for sunrise/
+// sunset display when the user is browsing from a different timezone.
+function fmtHMatLng(d, lng) {
+  const utcMin = d.getUTCHours() * 60 + d.getUTCMinutes()
+  const offsetMin = Math.round(lng / 15) * 60
+  const total = ((utcMin + offsetMin) % 1440 + 1440) % 1440
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 function attachSun(banner) {
   if (!banner) return banner
@@ -558,7 +582,7 @@ function attachSun(banner) {
   if (lat == null || lng == null) return banner
   const t = SunCalc.getTimes(new Date(banner.day.date), lat, lng)
   if (!t.sunrise || !t.sunset || isNaN(t.sunrise) || isNaN(t.sunset)) return banner
-  return { ...banner, sun: { rise: fmtHM(t.sunrise), set: fmtHM(t.sunset) } }
+  return { ...banner, sun: { rise: fmtHMatLng(t.sunrise, lng), set: fmtHMatLng(t.sunset, lng) } }
 }
 
 const todayBanner = computed(() => {
