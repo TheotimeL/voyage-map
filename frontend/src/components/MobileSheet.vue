@@ -20,7 +20,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const STATES = { peek: 8, half: 50, full: 92 } // % of viewport height
 const order = ['peek', 'half', 'full']
@@ -28,6 +28,14 @@ const order = ['peek', 'half', 'full']
 const state = ref('peek')
 const sheetEl = ref(null)
 const heightPct = computed(() => STATES[state.value])
+
+// Toggle a body class so map-overlay buttons (FAB, locate-me) can hide when expanded.
+function syncBodyClass(s) {
+  document.body.classList.toggle('sheet-expanded', s !== 'peek')
+}
+watch(state, syncBodyClass)
+onMounted(() => syncBodyClass(state.value))
+onUnmounted(() => document.body.classList.remove('sheet-expanded'))
 
 let dragStartY = null
 let dragStartPct = null
@@ -57,7 +65,10 @@ function onDragEnd(e) {
   e.target.releasePointerCapture?.(e.pointerId)
 }
 
-defineExpose({ setState: (s) => { if (STATES[s]) state.value = s } })
+defineExpose({
+  setState: (s) => { if (STATES[s]) state.value = s },
+  promoteFromPeek: () => { if (state.value === 'peek') state.value = 'half' },
+})
 </script>
 
 <style scoped>

@@ -336,9 +336,10 @@ onMounted(async () => {
 
 function initLeaflet() {
   leaflet = L.map(mapEl.value, {
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: true,
   })
+  L.control.zoom({ position: 'topright' }).addTo(leaflet)
   attachTiles()
 
   const center = [mapData.value.center_lat, mapData.value.center_lng]
@@ -941,6 +942,9 @@ onBeforeUnmount(() => {
   transition: transform 80ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 .locate-me:hover { background: var(--ink); color: var(--paper); }
+@media (max-width: 720px) {
+  .locate-me { bottom: 144px; }
+}
 .locate-me:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
 .locate-me:disabled { opacity: 0.5; cursor: wait; }
 .locate-me.on { background: #3b82f6; border-color: #1e40af; color: #fff; box-shadow: 0 3px 0 #1e40af, 0 6px 12px rgba(0,0,0,0.18); }

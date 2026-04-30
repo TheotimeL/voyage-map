@@ -9,9 +9,9 @@
     </template>
   </DesktopDock>
 
-  <MobileSheet v-else>
+  <MobileSheet v-else ref="sheetRef">
     <template #tabs>
-      <TabBar :tabs="tabs" :active="active" @update:active="(k) => emit('update:active', k)" />
+      <TabBar :tabs="tabs" :active="active" @update:active="onMobileTab" />
     </template>
     <header class="sheet-head"><slot name="header" /></header>
     <div><slot :name="active" /></div>
@@ -33,6 +33,7 @@ const emit = defineEmits(['update:active'])
 const mq = window.matchMedia('(max-width: 720px)')
 const isMobile = ref(mq.matches)
 const collapsed = ref(false)
+const sheetRef = ref(null)
 function onMQ(e) { isMobile.value = e.matches }
 onMounted(() => mq.addEventListener('change', onMQ))
 onUnmounted(() => mq.removeEventListener('change', onMQ))
@@ -40,6 +41,11 @@ onUnmounted(() => mq.removeEventListener('change', onMQ))
 function rail(key) {
   emit('update:active', key)
   collapsed.value = false
+}
+
+function onMobileTab(key) {
+  emit('update:active', key)
+  sheetRef.value?.promoteFromPeek?.()
 }
 </script>
 

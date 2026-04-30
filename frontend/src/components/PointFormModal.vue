@@ -78,11 +78,12 @@ function submit() {
 
 <style scoped>
 .modal {
-  width: min(440px, 100%);
+  width: min(540px, 100%);
   max-height: 90vh;
   overflow-y: auto;
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
+  padding: 1.4rem 1.5rem;
 }
 .lbl {
   font-family: var(--mono);
@@ -90,21 +91,21 @@ function submit() {
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--ink-faded);
-  margin-top: 0.4rem;
+  margin-top: 0.2rem;
 }
 .cat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.4rem;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5rem;
 }
 .cat {
   background: var(--cream);
   border: 1.5px solid var(--ink);
   border-radius: 4px;
-  padding: 0.55rem 0.2rem;
+  padding: 0.6rem 0.3rem;
   cursor: pointer;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.25rem;
   font-family: var(--body);
   color: var(--ink-soft);
   transition: all 90ms ease;

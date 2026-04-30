@@ -275,6 +275,10 @@ input[type="range"]::-moz-range-thumb {
 /* Utility */
 .hidden { display: none !important; }
 
+/* Mobile: hide map-overlay buttons when bottom sheet is expanded above peek. */
+body.sheet-expanded .map-fab,
+body.sheet-expanded .locate-me { display: none; }
+
 [data-theme="dark"] {
   --paper: #14171a;
   --cream: #1c2024;
