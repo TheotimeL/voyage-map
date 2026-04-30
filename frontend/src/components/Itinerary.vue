@@ -11,25 +11,31 @@
     </p>
 
     <ol v-if="days.length" class="iti-list">
-      <li
-        v-for="(d, i) in days"
-        :key="d.id"
-        class="iti-day"
-        :class="{ today: isToday(d.date), past: isPast(d.date), future: isFuture(d.date) }"
-      >
-        <div class="iti-date" :title="d.date">
-          <span class="d-num">{{ shortDay(d.date) }}</span>
-          <span class="d-mon mono">{{ shortMonth(d.date) }}</span>
+      <template v-for="(d, i) in days" :key="d.id">
+        <li
+          class="iti-day"
+          :class="{ today: isToday(d.date), past: isPast(d.date), future: isFuture(d.date) }"
+        >
+          <div class="iti-date" :title="d.date">
+            <span class="d-num">{{ shortDay(d.date) }}</span>
+            <span class="d-mon mono">{{ shortMonth(d.date) }}</span>
+          </div>
+          <div class="iti-body">
+            <button class="iti-label" type="button" @click="$emit('go', d)">
+              {{ d.label || 'Untitled' }}
+              <span v-if="d.lat == null" class="locate-hint" title="Click to locate via search">⌖</span>
+            </button>
+            <p v-if="d.notes" class="iti-notes">{{ d.notes }}</p>
+          </div>
+          <button class="iti-del" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
+        </li>
+        <div
+          v-if="i < days.length - 1 && legKm(d, days[i + 1]) != null"
+          class="iti-leg mono"
+        >
+          ↓ {{ legKm(d, days[i + 1]) }} km
         </div>
-        <div class="iti-body">
-          <button class="iti-label" type="button" @click="$emit('go', d)">
-            {{ d.label || 'Untitled' }}
-            <span v-if="d.lat == null" class="locate-hint" title="Click to locate via search">⌖</span>
-          </button>
-          <p v-if="d.notes" class="iti-notes">{{ d.notes }}</p>
-        </div>
-        <button class="iti-del" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
-      </li>
+      </template>
     </ol>
     <p v-else class="hint mono">No days yet — add one below.</p>
 
@@ -91,6 +97,21 @@ function del(d) {
 
 function goToday() {
   if (todayDay.value) emit('go', todayDay.value)
+}
+
+// Great-circle distance between two days that both carry coords. Returns
+// null when either day lacks a position.
+function legKm(a, b) {
+  if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null
+  const R = 6371
+  const toRad = (deg) => deg * Math.PI / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  const km = 2 * R * Math.asin(Math.sqrt(h))
+  return Math.round(km)
 }
 </script>
 
@@ -190,6 +211,13 @@ function goToday() {
 .iti-del:hover { color: var(--vermillion); background: var(--cream); }
 .iti-day.today .iti-del { color: rgba(255,255,255,0.7); }
 .iti-day.today .iti-del:hover { color: var(--paper); background: var(--vermillion-deep); }
+
+.iti-leg {
+  font-size: 0.66rem;
+  color: var(--ink-faded);
+  letter-spacing: 0.14em;
+  padding: 0.15rem 0 0.15rem 2.6rem;
+}
 
 .iti-add {
   display: grid;
