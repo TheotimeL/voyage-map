@@ -6,8 +6,17 @@ The current MapView has a 6-section vertical sidebar (Voyage header → Places �
 
 User priorities (from brainstorming):
 - **Both mobile and desktop matter equally** during the May 9–30 trip (planning + in-van).
-- **High-frequency** sections: Places, Itinerary, Routes — these stay one tap away.
+- **High-frequency** sections: Places (now including trails), Itinerary — these stay one tap away.
 - **On-demand** sections: Daylight, Survival POIs, Offline — these can be tucked behind a "More" affordance.
+
+## Domain change: routes-as-points
+
+The current data model has two top-level concepts: `Point` (a pin with title/comment/category) and `Track` (a GPX line with name/color but no notes/category/lat/lng). The user wants **routes to be first-class pinpoints with their own notes and metadata, just rendered differently on the map**. This means:
+
+- A `Point` gains an optional `gpx_data` column (Text, nullable) and an optional `color` column (the existing track color, used only when `gpx_data` is set). When `gpx_data` is present, the point renders as a marker AT the trailhead (first GPX coordinate) PLUS a polyline AND an elevation profile when active.
+- Trails get the same fields as any other point: `title`, `comment`, `category`, `lat`, `lng`. Categories are extended with a `trail` value, and the Places list distinguishes trail rows visually with a color swatch on the left edge.
+- The dedicated "Routes" section disappears as a separate concept. Trails live in the Places list alongside campgrounds, viewpoints, water sources, etc.
+- The existing `Track` table is migrated into `points` rows: each track becomes a Point with `category='trail'`, `lat`/`lng` set to the first GPX coordinate, `title` set to the track name, and `gpx_data` preserved. The `tracks` table and its API endpoints are removed.
 
 ## Approach: map-first + adaptive InfoPanel
 
@@ -20,6 +29,8 @@ A persistent "today's stop" banner overlays the top of the map (already exists �
 
 ## Layout
 
+Tab structure becomes **two primary tabs** (Places, Itinerary) plus the ⋯ More menu — Routes is folded into Places.
+
 ### Mobile bottom sheet — three states
 1. **Peek** (~64px above the safe-area inset): just the handle bar + tab bar. Map ≈ 95% of screen. The today's-stop banner remains a separate map overlay above this; it does not live inside the sheet.
 2. **Half** (~50vh): the active tab's content. Default when a tab is tapped.
@@ -30,7 +41,7 @@ Snap to nearest state on drag release. Tapping the map collapses to peek. Sheet 
 ### Desktop floating dock
 - Floats on the left, 360px wide, top-aligned with 16px inset on all sides.
 - Internal header: voyage title (inline-edit), coords, radius slider — compact row.
-- Tab bar: Places · Itinerary · Routes · ⋯
+- Tab bar: Places · Itinerary · ⋯
 - Active tab content fills remaining height; overflow scrolls within the dock.
 - Collapse button (⟨) collapses to a 48px icon rail (one icon per tab + ⋯). Click an icon to re-expand on that tab.
 
@@ -49,18 +60,14 @@ Already exists. Behavior unchanged: shown only when there *is* a "today" stop. C
 Voyage title, coords, radius live in the dock's compact header (above tabs), not in this tab. Places tab itself contains:
 - `GeocoderSearch`
 - "Use my location" link
-- `CategoryFilters`
-- `PointList`
+- `CategoryFilters` — gains a `trail` chip alongside the existing categories
+- `PointList` — rows render trail-points with a color swatch, distance (km), and elevation gain (D+) inline; non-trail rows stay simple
+- "Drop a .gpx anywhere on the map" hint stays in this tab as a footnote
 
-The "+ Drop" button is removed from this tab — it becomes a map FAB.
+The "+ Drop" button is removed from this tab — it becomes a map FAB. GPX import remains drag-and-drop on the map plus a `+ GPX` button in the Places tab header (next to the FAB-relocated drop-pin trigger).
 
 ### Itinerary
 - `Itinerary` component as-is. No changes to its internals — only its container.
-
-### Routes
-- `+ GPX` action in tab header.
-- Track list as-is.
-- "Drop a .gpx anywhere on the map" hint as-is.
 
 ### ⋯ More menu
 A popover (mobile: full-width modal sheet; desktop: anchored popover) containing:
@@ -84,8 +91,19 @@ A popover (mobile: full-width modal sheet; desktop: anchored popover) containing
 - `MapView.vue` — sheds its `<aside class="sidebar">` block. Renders `<InfoPanel>` + map overlays. Drops ~600 lines of sidebar CSS.
 - The 6 section `<section class="sec">` wrappers and the `№ 0X` numbering disappear. Section identity is now carried by tabs/icons, not by numbered headings.
 
+### Refactored (data-model unification)
+- `services/models.py` — `Point` gains `gpx_data: Mapped[str | None]`. `Track` table is removed.
+- `services/schemas.py` — `Point` schema gains optional `gpx_data` field. `Track` schema removed.
+- `api/points.py` — accepts `gpx_data` on create/update.
+- `api/tracks.py` — deleted.
+- `api/maps.py` — stops nesting `tracks` in the map response; `points` carries everything.
+- Migration: one-shot Python script that reads existing `tracks` rows, parses each GPX to extract first coordinate, inserts a `Point` with `category='trail'`, `lat`/`lng` = first coord, `title` = track name, `gpx_data` = original GPX, `comment` = null. Drops the `tracks` table afterward.
+- `frontend/src/components/PointList.vue` — recognises trail rows (points with `gpx_data`) and renders a color swatch on the left edge. Click on a trail row toggles the polyline + elevation profile (replacing the current `activeTrackId` mechanism, which becomes `activeTrailPointId`).
+- `frontend/src/components/CategoryFilters.vue` — adds a `trail` chip.
+- `frontend/src/views/MapView.vue` — track-rendering logic (polyline, elevation profile, color swatch) keys off `point.gpx_data` instead of a separate `tracks` array. GPX drag-and-drop creates a `Point` with `category='trail'` and opens `PointFormModal` to edit name/notes.
+
 ### Untouched
-- `CategoryFilters`, `PointList`, `Itinerary`, `SunPanel`, `SurvivalLayer`, `PrecacheButton`, `RadiusSlider`, `GeocoderSearch`, `PointDetailCard`, `PointFormModal`, `ElevationProfile`, `CompassRose`, `ThemeToggle` — all keep their public API. They become children of new containers.
+- `Itinerary`, `SunPanel`, `SurvivalLayer`, `PrecacheButton`, `RadiusSlider`, `GeocoderSearch`, `PointDetailCard`, `PointFormModal`, `ElevationProfile`, `CompassRose`, `ThemeToggle` — all keep their public API. They become children of new containers (and `PointDetailCard` / `PointFormModal` already handle generic Point fields, so they accommodate trails for free).
 
 ## Visual language
 
@@ -113,21 +131,22 @@ Keep the vintage-travel-poster system intact (`vintage.css`):
 
 The migration ships incrementally; each step leaves the app working.
 
-1. **Scaffold InfoPanel + DesktopDock + TabBar.** Wire MapView to render them in parallel with the existing sidebar (behind a feature flag in dev). Three empty tabs. No mobile yet.
-2. **Migrate Places tab.** Move search, filters, list, and the existing `+ Drop` button into Places tab. Move voyage header (title/coords/radius) to dock header. Sidebar still hosts everything else.
-3. **Migrate Itinerary and Routes tabs.** Sidebar now hosts only Daylight/Survival/Offline/Share.
-4. **Build MoreMenu.** Migrate the remaining four into it. Sidebar deleted.
-5. **Build MobileSheet + drag-snap.** InfoPanel switches based on viewport. Old `@media (max-width: 720px)` sidebar rules deleted.
-6. **Move "Drop pin" to MapFab.** Remove `+ Drop` from Places header.
-7. **Polish:** banner extension on desktop, collapsed icon rail, safe-area insets, transitions.
+1. **Unify the data model.** Add `gpx_data` to `Point`, update schemas and API. Run the one-shot migration script that converts `tracks` rows into trail-points and drops the `tracks` table. Update `MapView.vue` to render trail-points (polyline + elevation) keyed off `point.gpx_data`. The "Routes" sidebar section now reads from points filtered by `gpx_data != null`. App still uses the old sidebar layout. Existing user data preserved.
+2. **Scaffold InfoPanel + DesktopDock + TabBar.** Wire MapView to render them in parallel with the existing sidebar (behind a feature flag in dev). Two empty tabs (Places, Itinerary). No mobile yet.
+3. **Migrate Places tab.** Move search, filters, list (with trail-row enrichment), and the existing `+ Drop` button into Places tab. Add `trail` filter chip. Move voyage header (title/coords/radius) to dock header. Sidebar still hosts everything else.
+4. **Migrate Itinerary tab.** Sidebar now hosts only Daylight/Survival/Offline/Share.
+5. **Build MoreMenu.** Migrate the remaining four into it. Sidebar deleted.
+6. **Build MobileSheet + drag-snap.** InfoPanel switches based on viewport. Old `@media (max-width: 720px)` sidebar rules deleted.
+7. **Move "Drop pin" to MapFab.** Remove `+ Drop` from Places header.
+8. **Polish:** banner extension on desktop, collapsed icon rail, safe-area insets, transitions.
 
-Each step is mergeable on its own. After step 5, the redesign is functionally done; steps 6–7 are polish.
+Each step is mergeable on its own. After step 6, the redesign is functionally done; steps 7–8 are polish.
 
 ## What we're explicitly NOT doing
 
-- No new features. This is a layout/hierarchy redesign, not a scope expansion.
-- No backend changes.
-- No icon set overhaul; keep the existing emoji glyphs (📍 🗓 📈 ☀ 💧 📡) for tabs/rail.
+- No new features. The user-facing scope is a layout/hierarchy redesign plus the routes-as-points unification — nothing else.
+- Backend changes are limited to the `Point`/`Track` unification described above; no other API or schema work.
+- No icon set overhaul; keep the existing emoji glyphs (📍 🗓 ☀ 💧 📡) for tabs/rail. Trail rows in PointList use a color swatch (existing track-color) plus a km / D+ summary, not an icon.
 - No router/state-management refactor; tab state lives in InfoPanel local state.
 - No animation library; CSS transitions + a small pointer-event drag handler are enough.
 
