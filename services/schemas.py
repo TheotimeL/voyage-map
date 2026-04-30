@@ -17,6 +17,8 @@ class PointIn(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     comment: str | None = Field(default=None, max_length=2000)
     category: CATEGORIES = "note"
+    gpx_data: str | None = Field(default=None, max_length=10_000_000)
+    color: str | None = Field(default=None, max_length=20)
 
 
 class PointPatch(BaseModel):
@@ -25,6 +27,8 @@ class PointPatch(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     comment: str | None = Field(default=None, max_length=2000)
     category: CATEGORIES | None = None
+    gpx_data: str | None = Field(default=None, max_length=10_000_000)
+    color: str | None = Field(default=None, max_length=20)
 
 
 class PointOut(BaseModel):
@@ -36,6 +40,8 @@ class PointOut(BaseModel):
     title: str | None
     comment: str | None
     category: str
+    gpx_data: str | None
+    color: str | None
     created_at: datetime
 
 
