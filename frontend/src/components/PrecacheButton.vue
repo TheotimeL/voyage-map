@@ -10,8 +10,11 @@
     </button>
     <div v-if="running || lastDone" class="precache-bar">
       <div class="bar-fill" :style="{ width: pct + '%' }"></div>
-      <span class="bar-text mono">{{ pct }}% · {{ done }} / {{ total }}</span>
+      <span class="bar-text mono">
+        {{ pct }}% · {{ done }} / {{ total }}<template v-if="failed"> · {{ failed }} failed</template>
+      </span>
     </div>
+    <p v-if="error" class="error sm">{{ error }}</p>
   </div>
 </template>
 
@@ -31,6 +34,7 @@ const running = ref(false)
 const done = ref(0)
 const total = ref(0)
 const failed = ref(0)
+const error = ref('')
 const lastDone = ref(localStorage.getItem('voyage:precache:done') || '')
 
 const pct = computed(() => (total.value ? Math.round((done.value / total.value) * 100) : 0))
@@ -43,14 +47,20 @@ const buttonLabel = computed(() => {
 async function run() {
   running.value = true
   done.value = 0; failed.value = 0
-  const tiles = tilesForBbox(props.bbox, [6, 12])
-  total.value = tiles.length
-  await preloadTiles(tiles, props.theme, {
-    onProgress: ({ done: d, failed: f }) => { done.value = d; failed.value = f },
-  })
-  lastDone.value = new Date().toISOString()
-  localStorage.setItem('voyage:precache:done', lastDone.value)
-  running.value = false
+  error.value = ''
+  try {
+    const tiles = tilesForBbox(props.bbox, [6, 12])
+    total.value = tiles.length
+    await preloadTiles(tiles, props.theme, {
+      onProgress: ({ done: d, failed: f }) => { done.value = d; failed.value = f },
+    })
+    lastDone.value = new Date().toISOString()
+    localStorage.setItem('voyage:precache:done', lastDone.value)
+  } catch (e) {
+    error.value = e?.message || 'Pre-cache failed.'
+  } finally {
+    running.value = false
+  }
 }
 </script>
 
@@ -72,4 +82,5 @@ async function run() {
   place-items: center;
   color: var(--ink-soft);
 }
+.error.sm { font-size: 0.78rem; color: var(--vermillion-deep); margin: 0; }
 </style>
