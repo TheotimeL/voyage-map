@@ -143,6 +143,11 @@ async function useMyLocation() {
 
 async function onPick(r) {
   picked.value = r
+  // Seed the title from the picked location's first segment, but only if the
+  // user hasn't typed anything yet (don't clobber their work).
+  if (!title.value.trim() && r.label) {
+    title.value = r.label.split(',')[0].trim().slice(0, 120)
+  }
   await nextTick()
   ensureMap()
   map.setView([r.lat, r.lng], 9)
