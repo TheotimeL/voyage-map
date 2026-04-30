@@ -45,6 +45,9 @@ function toggle(key) { emit('toggle', key) }
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.4rem;
+  border-bottom: 1px dotted var(--cream-edge);
 }
 .chip {
   display: inline-flex;

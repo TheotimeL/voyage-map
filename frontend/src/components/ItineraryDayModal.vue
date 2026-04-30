@@ -42,7 +42,7 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, useTemplateRef, computed } from 'vue'
+import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed } from 'vue'
 import { formatLat, formatLng, openInMaps } from '@/util.js'
 import GeocoderSearch from './GeocoderSearch.vue'
 
@@ -62,6 +62,10 @@ const hasCoord = computed(() => form.lat != null && form.lng != null)
 
 const dateInput = useTemplateRef('dateInput')
 onMounted(() => dateInput.value?.focus())
+
+function onEsc(e) { if (e.key === 'Escape') emit('close') }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
 
 function onPick(result) {
   form.lat = result.lat

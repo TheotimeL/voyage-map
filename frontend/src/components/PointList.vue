@@ -74,8 +74,9 @@ function trailStats(p) {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.4rem;
+  gap: 0.55rem;
 }
+.point + .point { /* extra breathing room between rows */ }
 .empty {
   font-family: var(--body);
   color: var(--ink-faded);

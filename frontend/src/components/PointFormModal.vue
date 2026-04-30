@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, useTemplateRef } from 'vue'
+import { reactive, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { CATEGORIES, formatLat, formatLng } from '@/util.js'
 
 const props = defineProps({
@@ -66,6 +66,10 @@ const form = reactive({
 
 const titleInput = useTemplateRef('titleInput')
 onMounted(() => titleInput.value?.focus())
+
+function onEsc(e) { if (e.key === 'Escape') emit('close') }
+onMounted(() => window.addEventListener('keydown', onEsc))
+onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
 
 function submit() {
   emit('save', {

@@ -977,7 +977,17 @@ function fitToContent({ initial = false, fallbackCenter = null } = {}) {
 
 function recenter() { fitToContent() }
 
+// Escape: cancel drop-mode > close detail card > close active trail.
+function onEsc(e) {
+  if (e.key !== 'Escape') return
+  if (dropMode.value) { dropMode.value = false; return }
+  if (detail.value) { closeDetail(); return }
+  if (activeTrailPointId.value != null) { activeTrailPointId.value = null; return }
+}
+onMounted(() => window.addEventListener('keydown', onEsc))
+
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onEsc)
   if (leaflet) {
     leaflet.remove()
     leaflet = null
