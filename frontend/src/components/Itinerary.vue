@@ -8,6 +8,7 @@
       {{ days.length }} {{ days.length === 1 ? 'day' : 'days' }}
       <template v-if="todayIdx >= 0"> · Day {{ todayIdx + 1 }} / {{ days.length }}</template>
       <template v-else-if="firstFutureIdx >= 0"> · {{ daysUntil(days[firstFutureIdx].date) }}</template>
+      <template v-if="totalKm > 0"> · ≈ {{ totalKm.toLocaleString() }} km</template>
     </p>
 
     <ol v-if="days.length" class="iti-list">
@@ -107,6 +108,16 @@ const firstISO = computed(() => '2020-01-01')
 const todayIdx = computed(() => props.days.findIndex((d) => d.date === today.value))
 const todayDay = computed(() => (todayIdx.value >= 0 ? props.days[todayIdx.value] : null))
 const firstFutureIdx = computed(() => props.days.findIndex((d) => d.date > today.value))
+
+const totalKm = computed(() => {
+  const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  let sum = 0
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const km = legKm(sorted[i], sorted[i + 1])
+    if (km != null) sum += km
+  }
+  return sum
+})
 
 function isToday(date) { return date === today.value }
 function isPast(date) { return date < today.value }
