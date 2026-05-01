@@ -36,14 +36,30 @@ defineEmits(['update:collapsed'])
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.06);
   z-index: 800;
   overflow: hidden;
+  transition: width 120ms ease;
 }
-.desktop-dock.collapsed { width: 56px; }
+.desktop-dock.collapsed {
+  width: 44px;
+  bottom: auto;
+  border-color: var(--cream-edge);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
 .dock-collapse {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 1;
 }
+.desktop-dock.collapsed .dock-collapse {
+  position: static;
+  margin: 0.35rem auto 0.15rem;
+}
 .dock-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.dock-rail { flex: 1; padding: 2.5rem 0.5rem 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.dock-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 0.25rem 0.4rem;
+  align-items: stretch;
+}
 </style>

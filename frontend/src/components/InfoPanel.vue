@@ -1,5 +1,5 @@
 <template>
-  <DesktopDock v-if="!isMobile" v-model:collapsed="collapsed">
+  <DesktopDock v-if="!isMobile" :collapsed="collapsed" @update:collapsed="$emit('update:collapsed', $event)">
     <header class="dock-head"><slot name="header" /></header>
     <TabBar :tabs="tabs" :active="active" @update:active="(k) => emit('update:active', k)" />
     <div class="tab-content"><slot :name="active" /></div>
@@ -27,12 +27,12 @@ import TabBar from './TabBar.vue'
 const props = defineProps({
   tabs: { type: Array, required: true },
   active: { type: String, required: true },
+  collapsed: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:active'])
+const emit = defineEmits(['update:active', 'update:collapsed'])
 
 const mq = window.matchMedia('(max-width: 720px)')
 const isMobile = ref(mq.matches)
-const collapsed = ref(false)
 const sheetRef = ref(null)
 function onMQ(e) { isMobile.value = e.matches }
 onMounted(() => mq.addEventListener('change', onMQ))
@@ -40,7 +40,7 @@ onUnmounted(() => mq.removeEventListener('change', onMQ))
 
 function rail(key) {
   emit('update:active', key)
-  collapsed.value = false
+  emit('update:collapsed', false)
 }
 
 function onMobileTab(key) {

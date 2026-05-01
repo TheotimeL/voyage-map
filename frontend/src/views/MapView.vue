@@ -1,9 +1,10 @@
 <template>
-  <main class="mapview">
+  <main class="mapview" :class="{ 'dock-collapsed': dockCollapsed }">
     <InfoPanel
       v-if="mapData"
       :tabs="tabs"
       :active="activeTab"
+      v-model:collapsed="dockCollapsed"
       @update:active="(k) => activeTab = k"
     >
       <template #header>
@@ -41,13 +42,19 @@
       </template>
 
       <template #places>
-        <GeocoderSearch placeholder="Search a spot to mark…" :bias="searchBias" @pick="onSearchPick" />
-        <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
-          ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
-        </button>
+        <div class="pins-search-row">
+          <GeocoderSearch class="pins-search" placeholder="Search a spot to mark…" :bias="searchBias" @pick="onSearchPick" />
+          <button
+            class="pins-locate"
+            type="button"
+            :disabled="locating"
+            :title="locating ? 'Locating…' : 'Use my location to sort by distance'"
+            aria-label="Use my location"
+            @click="markMyLocation"
+          >⌖</button>
+        </div>
         <p v-if="locateError" class="error sm">{{ locateError }}</p>
         <div class="pins-filter mono">
-          <span class="filter-eyebrow">Show</span>
           <div class="seg" role="tablist">
             <button
               type="button"
@@ -66,19 +73,13 @@
               @click="showAllPins = true"
             >All</button>
           </div>
-          <span class="filter-meta">{{ pinsTabPoints.length }} / {{ (mapData.points || []).length }}</span>
+          <span class="filter-meta">{{ pinsTabPoints.length }}/{{ (mapData.points || []).length }}</span>
+          <CategoryFilters class="pins-cats" :points="pinsTabPoints" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
         </div>
-        <CategoryFilters :points="pinsTabPoints" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
         <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
         <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
         <p class="hint mono gpx-hint">
-          <span>Trails:</span>
-          <span>drop a <code>.gpx</code> on the map</span>
-          <span class="sep">·</span>
-          <label class="link-pick">
-            <span>pick a file</span>
-            <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
-          </label>
+          Drop a <code>.gpx</code> on the map · <label class="link-pick">pick a file<input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" /></label>
         </p>
       </template>
 
@@ -314,6 +315,7 @@ const loading = ref(true)
 const error = ref('')
 const titleDraft = ref('')
 const activeTab = ref('itinerary')
+const dockCollapsed = ref(false)
 // No emoji — the cream/ink palette plus typographic eyebrows do the visual
 // work; color emoji clash with the paper aesthetic. Glyphs below are
 // monoglyph unicode marks (chevron / pin-shape / dots) that pick up the
@@ -1896,7 +1898,9 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   display: flex;
+  --ribbon-pad: 392px;
 }
+.mapview.dock-collapsed { --ribbon-pad: 72px; }
 .map-wrap {
   flex: 1;
   position: relative;
@@ -1918,13 +1922,15 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 650;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-  padding-left: 392px;
+  padding-left: var(--ribbon-pad, 392px);
+  transition: padding-left 120ms ease;
 }
 @media (max-width: 720px) {
   /* Mobile: thinner variant — kept visible above the map, no dock offset.
      The component itself drops the day-number + date chips at this width
      so the ribbon is roughly half the desktop height. */
-  .trip-ribbon { padding-left: 0; }
+  .mapview { --ribbon-pad: 0; }
+  .mapview.dock-collapsed { --ribbon-pad: 0; }
 }
 .error { color: var(--vermillion-deep); }
 
@@ -2016,20 +2022,37 @@ onBeforeUnmount(() => {
   cursor: help;
 }
 
+.pins-search-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+  margin-bottom: 0.5rem;
+}
+.pins-search { flex: 1; min-width: 0; }
+.pins-locate {
+  width: 38px;
+  flex: 0 0 38px;
+  background: var(--paper);
+  border: 1px solid var(--cream-edge);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 1.05rem;
+  color: var(--vermillion);
+  display: grid;
+  place-items: center;
+  transition: background 90ms ease, border-color 90ms ease;
+}
+.pins-locate:hover { background: var(--cream); border-color: var(--ink); color: var(--vermillion-deep); }
+.pins-locate:disabled { color: var(--ink-faded); cursor: wait; }
+
 .pins-filter {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.3rem 0;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.5rem;
+  padding: 0.3rem 0 0.45rem;
   border-bottom: 1px dotted var(--cream-edge);
-  margin-bottom: 0.4rem;
-}
-.filter-eyebrow {
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--ink-faded);
+  margin-bottom: 0.5rem;
 }
 .seg {
   display: inline-flex;
@@ -2054,23 +2077,8 @@ onBeforeUnmount(() => {
   font-size: 0.66rem;
   letter-spacing: 0.16em;
   color: var(--ink-faded);
-  margin-left: auto;
 }
-
-.locate-link {
-  background: transparent;
-  border: none;
-  padding: 0.1rem 0;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--vermillion);
-  cursor: pointer;
-  justify-self: start;
-}
-.locate-link:hover { color: var(--vermillion-deep); }
-.locate-link:disabled { color: var(--ink-faded); cursor: wait; }
+.pins-cats { flex: 1 1 100%; min-width: 0; }
 .error.sm { font-size: 0.82rem; margin: 0; }
 
 /* Floating "show me" map control — aligns under the 56px FAB at right: 16px */
@@ -2124,15 +2132,13 @@ onBeforeUnmount(() => {
 .hint { font-size: 0.72rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
 .gpx-hint {
   padding-top: 0.5rem;
-  border-top: 1px dashed var(--cream-edge);
   margin-top: 0.6rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: baseline;
+  border-top: 1px dotted var(--cream-edge);
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  letter-spacing: 0.04em;
 }
 .gpx-hint code { font-family: var(--mono); color: var(--vermillion); padding: 0 2px; }
-.gpx-hint .sep { color: var(--ink-faded); opacity: 0.6; }
 
 /* Drop-mode floating hint: pinned just above the FAB. */
 .drop-hint {

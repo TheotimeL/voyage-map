@@ -22,10 +22,15 @@
             :max="lastISO || undefined"
             required
           />
-          <button class="btn btn-add" type="submit" title="Add an empty stop with no location">+ Stop</button>
+          <button
+            class="btn-add-mini"
+            type="submit"
+            :title="`Add an empty stop on ${form.date || 'this date'}`"
+            aria-label="Add empty stop"
+          >+</button>
         </form>
         <GeocoderSearch
-          placeholder="…or search a place to drop on this date"
+          placeholder="Search a place for this date"
           :bias="bias"
           @pick="onAddPick"
         />
@@ -788,11 +793,11 @@ function legKm(a, b) {
 
 .add-inline {
   display: grid;
-  gap: 0.5rem;
-  padding: 0.7rem 0.7rem 0.8rem;
+  gap: 0.45rem;
+  padding: 0.6rem;
   margin-bottom: 0.4rem;
   background: var(--cream);
-  border: 1px dashed var(--cream-edge);
+  border: 1px solid var(--cream-edge);
   border-radius: 4px;
 }
 .reveal-enter-active, .reveal-leave-active {
@@ -1258,32 +1263,33 @@ function legKm(a, b) {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: stretch;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 .field.tiny { padding: 0.45rem 0.6rem; font-size: 0.88rem; }
 .field.add-date {
-  padding: 0.55rem 0.7rem;
-  font-size: 0.92rem;
-  height: 38px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+  height: 34px;
   box-sizing: border-box;
 }
-.btn-add {
-  height: 38px;
-  padding: 0 1rem;
-  font-size: 0.85rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  background: var(--vermillion);
-  color: var(--paper);
-  border: none;
-  border-radius: 4px;
+.btn-add-mini {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 3px;
   cursor: pointer;
   font-family: var(--display);
-  box-shadow: 0 2px 0 var(--vermillion-deep);
-  transition: background 90ms ease;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  transition: background 90ms ease, color 90ms ease;
 }
-.btn-add:hover { background: var(--vermillion-deep); }
-.btn-add:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--vermillion-deep); }
+.btn-add-mini:hover { background: var(--ink); color: var(--paper); }
+.btn-add-mini:active { transform: translateY(1px); }
 
 .hint { font-size: 0.74rem; color: var(--ink-faded); margin: 0.2rem 0 0; letter-spacing: 0.06em; }
 
