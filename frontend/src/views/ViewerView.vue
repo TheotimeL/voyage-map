@@ -7,7 +7,14 @@
       </div>
       <div class="viewer-bar-right">
         <p v-if="mapData" class="viewer-stats mono">{{ statsLine }}</p>
-        <RouterLink :to="{ name: 'map', params: { slug } }" class="viewer-edit mono">Open editor →</RouterLink>
+        <!-- Hidden by default so the edit URL doesn't leak to recipients of
+             the share link. The host bookmarks /v/<slug>?host=1 and the link
+             reappears for them. No real auth — just convention. -->
+        <RouterLink
+          v-if="$route.query.host"
+          :to="{ name: 'map', params: { slug } }"
+          class="viewer-edit mono"
+        >Open editor →</RouterLink>
       </div>
     </header>
 
@@ -167,7 +174,9 @@ function renderAll() {
     }
     cumulative += span
   }
-  // Pins + trails
+  // Pins + trails — mirror the editor's emoji divIcon so the viewer reads
+  // the same as the editor (the default blue droplet was off-aesthetic and
+  // hid the pin's category at a glance).
   let trailIdx = 0
   for (const p of mapData.value.points || []) {
     if (p.gpx_data) {
@@ -182,9 +191,28 @@ function renderAll() {
         trailIdx++
       } catch { /* skip bad GPX */ }
     } else {
-      L.marker([p.lat, p.lng]).addTo(leaflet)
+      L.marker([p.lat, p.lng], {
+        icon: pinIconFor(p),
+        title: p.title || categoryLabel(p),
+      }).addTo(leaflet)
     }
   }
+}
+
+const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
+function pinIconFor(p) {
+  // Trails without GPX data still surface here (rare — a manually-categorised
+  // trail row); use the boot emoji to stay consistent with the editor.
+  const glyph = p.category === 'trail' ? '🥾' : (emojiByCategory[p.category] || '📍')
+  return L.divIcon({
+    className: 'pin-wrapper',
+    html: `<div class="pin"><span>${glyph}</span></div>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+  })
+}
+function categoryLabel(p) {
+  return CATEGORIES.find((c) => c.key === p.category)?.label || 'Pin'
 }
 
 function fitToContent() {
