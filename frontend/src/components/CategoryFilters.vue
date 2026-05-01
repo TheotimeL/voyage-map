@@ -10,6 +10,7 @@
       @click="toggle(c.key)"
     >
       <span class="ch-emoji">{{ c.emoji }}</span>
+      <span class="ch-label">{{ c.label }}</span>
       <span class="ch-count">{{ c.count }}</span>
     </button>
     <button v-if="hidden.size > 0" type="button" class="reset" @click="$emit('reset')">All</button>
@@ -53,9 +54,11 @@ function toggle(key) { emit('toggle', key) }
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.25rem 0.55rem;
+  padding: 0.2rem 0.55rem;
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   background: var(--paper);
   color: var(--ink);
   border: 1.5px solid var(--ink);
@@ -63,6 +66,18 @@ function toggle(key) { emit('toggle', key) }
   cursor: pointer;
   transition: all 90ms ease;
 }
+.ch-label { font-weight: 600; }
+.ch-count {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  min-width: 1.1rem;
+  text-align: center;
+  font-size: 0.7rem;
+}
+.chip.off .ch-count { background: var(--ink-faded); }
 .chip:hover { background: var(--cream); }
 .chip.off {
   background: transparent;

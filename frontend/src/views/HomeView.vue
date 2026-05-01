@@ -102,8 +102,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onBeforeUnmount, nextTick, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import L from 'leaflet'
 import { api } from '@/api.js'
 import { getMyLocation } from '@/util.js'
@@ -111,7 +111,19 @@ import { recentMaps, rememberMap, forgetMap } from '@/lib/recents.js'
 import CompassRose from '@/components/CompassRose.vue'
 import GeocoderSearch from '@/components/GeocoderSearch.vue'
 
+const route = useRoute()
 const router = useRouter()
+
+// Personal-app convenience: when there's exactly one recent voyage, jump
+// straight into it on '/'. Multi-voyage users still get the picker. The
+// dock-back link "← Voyages" navigates here with ?home=1 so it overrides.
+onMounted(() => {
+  if (route.query.home != null) return
+  const rs = recentMaps()
+  if (rs.length === 1) {
+    router.replace({ name: 'map', params: { slug: rs[0].slug } })
+  }
+})
 const year = new Date().getFullYear()
 
 const picked = ref(null)

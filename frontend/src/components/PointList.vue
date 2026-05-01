@@ -1,43 +1,71 @@
 <template>
-  <ul class="point-list">
-    <li v-if="points.length === 0" class="empty">
+  <div class="point-list-wrap">
+    <p v-if="points.length === 0" class="empty">
       <em>No marks yet. Click the map to drop one.</em>
-    </li>
-    <li
-      v-for="p in points"
-      :key="p.id"
-      class="point"
-      :class="{ active: p.id === activeId, 'is-trail': !!p.gpx_data }"
-      :style="p.gpx_data && p.color ? { '--swatch': p.color } : null"
-      @click="$emit('select', p)"
-    >
-      <span class="pin-mini">{{ emojiFor(p.category) }}</span>
-      <div class="text">
-        <div class="title">{{ p.title || untitled(p) }}</div>
-        <div v-if="p.gpx_data" class="trail-stats mono">
-          <template v-if="trailStats(p)">
-            {{ trailStats(p).km }} km · D+ {{ trailStats(p).gain }} m
-          </template>
-        </div>
-        <div v-if="p.comment" class="comment">{{ p.comment }}</div>
-        <div class="coord">
-          <template v-if="p._distKm != null"><span class="dist mono">{{ fmtDist(p._distKm) }}</span> · </template>
-          {{ formatLat(p.lat) }} · {{ formatLng(p.lng) }}
-        </div>
-      </div>
-    </li>
-  </ul>
+    </p>
+    <template v-else>
+      <section v-for="g in groups" :key="g.key" class="group">
+        <h5 v-if="g.title" class="group-title mono">{{ g.title }} · {{ g.items.length }}</h5>
+        <ul class="point-list">
+          <li
+            v-for="p in g.items"
+            :key="p.id"
+            class="point"
+            :class="{ active: p.id === activeId, 'is-trail': !!p.gpx_data }"
+            :style="p.gpx_data && p.color ? { '--swatch': p.color } : null"
+            @click="$emit('select', p)"
+          >
+            <span class="pin-mini">{{ emojiFor(p.category) }}</span>
+            <div class="text">
+              <div class="title">{{ p.title || untitled(p) }}</div>
+              <div v-if="p.gpx_data" class="trail-stats mono">
+                <template v-if="trailStats(p)">
+                  {{ trailStats(p).km }} km · D+ {{ trailStats(p).gain }} m
+                </template>
+              </div>
+              <div v-if="p.comment" class="comment">{{ p.comment }}</div>
+              <div class="coord">
+                <template v-if="p._distKm != null"><span class="dist mono">{{ fmtDist(p._distKm) }}</span> · </template>
+                {{ formatLat(p.lat) }} · {{ formatLng(p.lng) }}
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </template>
+  </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { CATEGORIES, formatLat, formatLng, parseGPX } from '@/util.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 
-defineProps({
+const props = defineProps({
   points: { type: Array, default: () => [] },
   activeId: { type: Number, default: null },
 })
 defineEmits(['select'])
+
+// Group into Pins vs Trails when the list isn't already sorted by distance
+// (when myLocation is shared, _distKm is set on every row and grouping would
+// undo that ordering — so we keep the flat sort instead).
+const isDistanceSorted = computed(() =>
+  props.points.length > 0 && props.points.every((p) => p._distKm != null),
+)
+const groups = computed(() => {
+  if (isDistanceSorted.value) {
+    return [{ key: 'all', title: '', items: props.points }]
+  }
+  const trails = props.points.filter((p) => p.gpx_data || p.category === 'trail')
+  const pins = props.points.filter((p) => !p.gpx_data && p.category !== 'trail')
+  const out = []
+  if (pins.length) out.push({ key: 'pins', title: 'Pins', items: pins })
+  if (trails.length) out.push({ key: 'trails', title: 'Trails', items: trails })
+  // If only one of the two, drop the title — no point in a single-section heading.
+  if (out.length === 1) out[0].title = ''
+  return out
+})
 
 const emojiMap = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
 function emojiFor(key) {
@@ -76,6 +104,17 @@ function trailStats(p) {
 </script>
 
 <style scoped>
+.point-list-wrap { display: grid; gap: 0.9rem; }
+.group { display: grid; gap: 0.4rem; }
+.group-title {
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  margin: 0;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px dotted var(--cream-edge);
+}
 .point-list {
   list-style: none;
   margin: 0;
@@ -83,7 +122,6 @@ function trailStats(p) {
   display: grid;
   gap: 0.55rem;
 }
-.point + .point { /* extra breathing room between rows */ }
 .empty {
   font-family: var(--body);
   color: var(--ink-faded);

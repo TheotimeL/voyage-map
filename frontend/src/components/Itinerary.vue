@@ -6,62 +6,67 @@
     </div>
 
     <p v-if="days.length" class="iti-meta mono">
-      {{ days.length }} {{ days.length === 1 ? 'day' : 'days' }}
-      <template v-if="todayIdx >= 0"> · Day {{ todayIdx + 1 }} / {{ days.length }}</template>
+      {{ uniqueDateCount }} {{ uniqueDateCount === 1 ? 'day' : 'days' }}
+      <template v-if="days.length > uniqueDateCount"> · {{ days.length }} stops</template>
+      <template v-if="todayDayNum"> · Day {{ todayDayNum }} / {{ uniqueDateCount }}</template>
       <template v-else-if="firstFutureIdx >= 0"> · {{ daysUntil(days[firstFutureIdx].date) }}</template>
       <template v-if="totalDriveKm > 0"> · {{ totalDriveKm.toLocaleString() }} km · {{ fmtMinutes(totalDriveMin) }} drive</template>
       <template v-else-if="totalKm > 0"> · ≈ {{ totalKm.toLocaleString() }} km</template>
     </p>
 
-    <ol v-if="days.length" class="iti-list">
-      <template v-for="(d, i) in days" :key="d.id">
+    <ol v-if="rows.length" class="iti-list">
+      <template v-for="(r, i) in rows" :key="r.day.id">
         <li
           class="iti-day"
-          :class="{ today: isToday(d.date), past: isPast(d.date), future: isFuture(d.date) }"
+          :class="{ today: isToday(r.day.date), past: isPast(r.day.date), future: isFuture(r.day.date), 'is-stop': !r.dateHead }"
         >
-          <div class="iti-date" :title="d.date">
-            <span class="d-dow mono">{{ shortDow(d.date) }}</span>
-            <span class="d-num">{{ shortDay(d.date) }}</span>
-            <span class="d-mon mono">{{ shortMonth(d.date) }}</span>
+          <div v-if="r.dateHead" class="iti-date" :title="r.day.date">
+            <span class="d-dow mono">{{ shortDow(r.day.date) }}</span>
+            <span class="d-num">{{ shortDay(r.day.date) }}</span>
+            <span class="d-mon mono">{{ shortMonth(r.day.date) }}</span>
+          </div>
+          <div v-else class="iti-date is-cont" aria-hidden="true">
+            <span class="cont-rule"></span>
           </div>
           <div class="iti-body">
-            <button class="iti-label" type="button" @click="$emit('go', d)">
-              {{ d.label || 'Untitled' }}
-              <span v-if="d.lat == null" class="locate-hint" title="No location yet — click to search">⌖</span>
+            <button class="iti-label" type="button" @click="$emit('go', r.day)">
+              <span class="day-num mono">DAY {{ r.dayIndex }}</span>
+              <span class="day-label">{{ r.cleanLabel || 'Untitled' }}</span>
+              <span v-if="r.day.lat == null" class="locate-hint" title="No location yet — click to search">⌖</span>
             </button>
-            <p v-if="forecastFor(d)" class="iti-wx mono">
-              {{ glyphFor(forecastFor(d).code) }}
-              {{ forecastFor(d).tMax }}° / {{ forecastFor(d).tMin }}°
-              <template v-if="forecastFor(d).precip > 0.5"> · {{ forecastFor(d).precip.toFixed(1) }}mm</template>
+            <p v-if="forecastFor(r.day)" class="iti-wx mono">
+              {{ glyphFor(forecastFor(r.day).code) }}
+              {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°
+              <template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
             </p>
-            <p v-else-if="weatherTooFar(d)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days — checks back from ${weatherStartDate}`">
-              · forecast in {{ weatherTooFar(d) }}d
+            <p v-else-if="weatherTooFar(r.day)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days — checks back from ${weatherStartDate}`">
+              · forecast in {{ weatherTooFar(r.day) }}d
             </p>
-            <p v-if="d.notes" class="iti-notes">{{ d.notes }}</p>
+            <p v-if="r.day.notes" class="iti-notes">{{ r.day.notes }}</p>
           </div>
           <div class="iti-actions">
             <button
-              v-if="d.lat != null && d.lng != null"
+              v-if="r.day.lat != null && r.day.lng != null"
               class="iti-icon"
               type="button"
-              :title="`Find trails near ${d.label || 'this day'}`"
-              @click="trailFor = d"
+              :title="`Find trails near ${r.day.label || 'this day'}`"
+              @click="trailFor = r.day"
             >🥾</button>
-            <button class="iti-icon" type="button" :title="`Edit day ${i + 1}`" @click="$emit('edit', d)">✎</button>
-            <button class="iti-icon" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
+            <button class="iti-icon" type="button" :title="`Edit day ${r.dayIndex}`" @click="$emit('edit', r.day)">✎</button>
+            <button class="iti-icon" type="button" :title="`Remove day ${r.dayIndex}`" @click="del(r.day)">×</button>
           </div>
         </li>
         <div
-          v-if="i < days.length - 1 && legKm(d, days[i + 1]) != null"
+          v-if="r.legNext && r.legNext.km != null"
           class="iti-leg mono"
-          :title="legTitle(d, days[i + 1])"
+          :title="r.legNext.title"
         >
-          <template v-if="legFor(d, days[i + 1])">
-            ↓ {{ legFor(d, days[i + 1]).km.toLocaleString() }} km · {{ fmtMinutes(legFor(d, days[i + 1]).minutes) }}
-            <span v-if="legFor(d, days[i + 1]).source === 'estimate'" class="leg-est">est</span>
+          <template v-if="r.legNext.real">
+            ↓ {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
+            <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
           </template>
           <template v-else>
-            ↓ ≈ {{ legKm(d, days[i + 1]) }} km
+            ↓ ≈ {{ r.legNext.km }} km
           </template>
         </div>
       </template>
@@ -185,6 +190,16 @@ const todayIdx = computed(() => props.days.findIndex((d) => d.date === today.val
 const todayDay = computed(() => (todayIdx.value >= 0 ? props.days[todayIdx.value] : null))
 const firstFutureIdx = computed(() => props.days.findIndex((d) => d.date > today.value))
 
+// Unique calendar-date count — used in the meta line and "Day N / M" label.
+// Differs from days.length when the user has multiple stops on the same date.
+const uniqueDateCount = computed(() => new Set(props.days.map((d) => d.date)).size)
+const todayDayNum = computed(() => {
+  const t = today.value
+  const dates = [...new Set(props.days.map((d) => d.date))].sort()
+  const idx = dates.indexOf(t)
+  return idx >= 0 ? idx + 1 : 0
+})
+
 const totalKm = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
   let sum = 0
@@ -193,6 +208,46 @@ const totalKm = computed(() => {
     if (km != null) sum += km
   }
   return sum
+})
+
+// Render rows: sorted by date with two derived flags per row.
+//   dateHead: true on the first row of each calendar date — controls whether
+//     the date badge column is shown (continuation rows render a hairline rule)
+//   cleanLabel: strip a leading "Day N — " from any user-typed label so we
+//     don't double-print the day number in the body
+//   legNext: only set when the next row is on a *different* date AND both
+//     sides have coords — silences the noisy "↓ 0 km" leg between same-day
+//     stops (e.g. Vegas → Excalibur Hotel on day 1).
+const rows = computed(() => {
+  const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  // Number unique calendar dates, not rows — two stops on the same date share
+  // their Day N. So "Day 1: Vegas" + "Day 1: Excalibur Hotel" both render Day 1.
+  const dayOfTrip = new Map()
+  let n = 0
+  for (const d of sorted) {
+    if (!dayOfTrip.has(d.date)) {
+      n += 1
+      dayOfTrip.set(d.date, n)
+    }
+  }
+  const out = []
+  for (let i = 0; i < sorted.length; i++) {
+    const day = sorted[i]
+    const prev = i > 0 ? sorted[i - 1] : null
+    const next = i < sorted.length - 1 ? sorted[i + 1] : null
+    const dateHead = !prev || prev.date !== day.date
+    const cleanLabel = day.label
+      ? day.label.replace(/^\s*Day\s*\d+\s*[—\-–:·]\s*/i, '').trim()
+      : ''
+    let legNext = null
+    if (next && next.date !== day.date && day.lat != null && day.lng != null && next.lat != null && next.lng != null) {
+      const km = legKm(day, next)
+      const real = legFor(day, next)
+      legNext = { km, real, title: legTitle(day, next) }
+    }
+    out.push({ day, dayIndex: dayOfTrip.get(day.date), dateHead, cleanLabel, legNext })
+  }
+  return out
 })
 
 // Real driving legs (cached). Loaded async; null until first resolution.
@@ -336,8 +391,6 @@ function legKm(a, b) {
   padding: 0;
   display: grid;
   gap: 0.25rem;
-  max-height: 28vh;
-  overflow-y: auto;
 }
 .iti-day {
   display: grid;
@@ -354,14 +407,25 @@ function legKm(a, b) {
   border-color: var(--vermillion-deep);
   color: var(--paper);
 }
-.iti-day.today .d-mon, .iti-day.today .iti-notes { color: rgba(255,255,255,0.8); }
+.iti-day.today .d-mon, .iti-day.today .iti-notes,
+.iti-day.today .day-num { color: rgba(255,255,255,0.8); }
 .iti-day.today .iti-label { color: var(--paper); }
 .iti-day.past { opacity: 0.55; }
+.iti-day.is-stop { padding-top: 0; padding-bottom: 0.3rem; }
 
 .iti-date {
   display: grid;
   text-align: center;
   line-height: 1;
+}
+.iti-date.is-cont { align-items: stretch; padding-block: 0.4rem; }
+.cont-rule {
+  width: 1px;
+  background: var(--cream-edge);
+  margin: 0 auto;
+  display: block;
+  align-self: stretch;
+  min-height: 14px;
 }
 .d-dow { font-size: 0.55rem; letter-spacing: 0.18em; color: var(--ink-faded); margin-bottom: -0.05rem; }
 .d-num { font-family: var(--display); font-size: 1.3rem; }
@@ -374,20 +438,42 @@ function legKm(a, b) {
   border: none;
   padding: 0;
   font: inherit;
-  font-weight: 600;
   color: var(--ink);
   cursor: pointer;
   text-align: left;
   display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
+  align-items: baseline;
+  gap: 0.45rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
 }
-.iti-label:hover { color: var(--vermillion); }
-.iti-day.today .iti-label:hover { color: var(--paper); text-decoration: underline; }
+.day-num {
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-faded);
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
+  border-radius: 2px;
+  padding: 0.05rem 0.3rem;
+  flex-shrink: 0;
+  align-self: center;
+  line-height: 1.4;
+}
+.day-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.iti-label:hover .day-label { color: var(--vermillion); }
+.iti-day.today .iti-label:hover .day-label { color: var(--paper); text-decoration: underline; }
+.iti-day.today .day-num {
+  background: var(--vermillion-deep);
+  border-color: var(--vermillion-deep);
+  color: rgba(255,255,255,0.85);
+}
 .locate-hint { font-size: 0.85em; opacity: 0.55; }
 .iti-notes {
   margin: 0.1rem 0 0;
@@ -442,11 +528,15 @@ function legKm(a, b) {
 .iti-wx.is-faded { color: var(--ink-faded); font-style: italic; }
 
 .add-block {
+  position: sticky;
+  bottom: 0;
   margin-top: 1rem;
-  padding-top: 0.8rem;
+  padding: 0.8rem 0 0.4rem;
   border-top: 1px dashed var(--cream-edge);
+  background: var(--paper);
   display: grid;
   gap: 0.5rem;
+  z-index: 2;
 }
 .add-eyebrow {
   font-size: 0.65rem;

@@ -7,7 +7,14 @@
       @update:active="(k) => activeTab = k"
     >
       <template #header>
-        <RouterLink to="/" class="dock-back mono" title="Back to all voyages">← Voyages</RouterLink>
+        <div class="dock-head-row">
+          <RouterLink :to="{ path: '/', query: { home: 1 } }" class="dock-back mono" title="Back to all voyages">← Voyages</RouterLink>
+          <div class="dock-head-actions">
+            <button v-if="hasContent" class="head-icon mono" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
+            <button class="head-icon mono" type="button" :title="copied ? 'Link copied' : 'Copy share link'" @click="copyUrl">{{ copied ? '✓' : '⧉' }}</button>
+            <ThemeToggle class="head-icon" />
+          </div>
+        </div>
         <h2 class="title">
           <input
             v-model="titleDraft"
@@ -18,11 +25,7 @@
             @keydown.enter="$event.target.blur()"
           />
         </h2>
-        <p class="coord meta">
-          <span class="meta-icon">⌖</span>
-          <span>{{ formatLat(mapData.center_lat) }} · {{ formatLng(mapData.center_lng) }}</span>
-          <button v-if="hasContent" class="recenter mono" type="button" @click="recenter" title="Re-fit to points + itinerary">↻ Fit</button>
-        </p>
+        <p v-if="headerSummary" class="head-summary mono">{{ headerSummary }}</p>
       </template>
 
       <template #places>
@@ -64,12 +67,9 @@
           :fallback-lng="mapData.center_lng"
           :get-bounds="getMapBounds"
           :theme="theme"
-          :copied="copied"
-          :stats="tripStats"
           :place-name="todayBanner?.day?.label || ''"
           @render-survival="renderSurvival"
           @clear-survival="clearSurvival"
-          @copy-url="copyUrl"
         />
       </template>
     </InfoPanel>
@@ -80,14 +80,18 @@
       @dragleave="onGpxDragLeave"
       @drop.prevent="onGpxDrop"
     >
-      <div v-if="todayBanner" class="today-banner" @click="onGoDay(todayBanner.day)">
-        <span class="banner-tag mono">{{ todayBanner.tag }}</span>
-        <span class="banner-text">{{ todayBanner.text }}</span>
-        <span v-if="bannerWx" class="banner-wx mono">
-          {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
-        </span>
-        <span v-if="todayBanner.sun" class="banner-sun mono">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
-        <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
+      <div v-if="todayBanner && !bannerDismissed" class="today-banner">
+        <button class="banner-main" type="button" :title="`Center on ${todayBanner.day.label || 'this day'}`" @click="onGoDay(todayBanner.day)">
+          <span class="banner-tag mono">{{ todayBanner.tag }}</span>
+          <span class="banner-text">{{ todayBanner.text }}</span>
+          <span v-if="bannerWx" class="banner-wx mono">
+            {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
+          </span>
+          <span v-if="todayBanner.sun" class="banner-sun mono">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
+          <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
+        </button>
+        <button class="banner-action" type="button" title="Edit this day" @click="editingDay = todayBanner.day">✎</button>
+        <button class="banner-close" type="button" title="Hide for this session" @click="dismissBanner">×</button>
       </div>
 
       <div ref="mapEl" class="map"></div>
@@ -197,6 +201,7 @@ import ElevationProfile from '@/components/ElevationProfile.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import MapFab from '@/components/MapFab.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap, updateRecentStats } from '@/lib/recents.js'
@@ -215,7 +220,7 @@ const activeTab = ref('places')
 const tabs = [
   { key: 'places', label: 'Places', icon: '📍' },
   { key: 'itinerary', label: 'Itinerary', icon: '🗓' },
-  { key: 'more', label: 'More', icon: '⋯' },
+  { key: 'more', label: 'Tools', icon: '⋯' },
 ]
 const activeId = ref(null)
 const modal = ref(null)
@@ -324,12 +329,15 @@ const tripStats = computed(() => {
       driveMin += leg.minutes
     }
   }
+  // "days" is the calendar-day count, not row count — two stops on the same
+  // day should still read as one day in the trip-wide summary.
+  const uniqueDays = new Set(days.map((d) => d.date)).size
   return {
     points: ps.length - trails.length,
     trails: trails.length,
     trailKm: Math.round(trailKm * 10) / 10,
     trailDPlus: Math.round(trailDPlus),
-    days: days.length,
+    days: uniqueDays,
     driveKm: Math.round(driveKm),
     driveMin: driveMin > 0 ? driveMin : null,
     driveMinFmt: driveMin > 0 ? fmtMinutes(driveMin) : null,
@@ -550,10 +558,14 @@ function initLeaflet() {
   // Initial view: fit to points + itinerary if any, otherwise centre on the map's saved center.
   fitToContent({ initial: true, fallbackCenter: center })
 
-  leaflet.on('moveend', () => { mapBboxBumper.value++ })
+  leaflet.on('moveend', () => {
+    mapBboxBumper.value++
+    hideOverlappingLabels()
+  })
   leaflet.on('zoomend', () => {
     mapBboxBumper.value++
     applyZoomDensity()
+    hideOverlappingLabels()
   })
   applyZoomDensity()
 
@@ -668,6 +680,41 @@ function renderItinerary() {
   attachLegLines(days)
   attachLegLabels(days)
   applyZoomDensity()
+  hideOverlappingLabels()
+}
+
+// Hide stacked permanent tooltips: walk markers in trip order and hide the
+// label of any whose rendered rect intersects an earlier (already-visible)
+// label. Leaves the day pin itself visible — only the text label is hidden.
+// Runs after every render and on zoom — collisions look different at every
+// zoom level.
+function hideOverlappingLabels() {
+  if (!leaflet) return
+  const placed = []
+  const days = (mapData.value?.itinerary || [])
+    .filter((d) => d.lat != null && d.lng != null)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+  for (const d of days) {
+    const m = itineraryMarkers.get(d.id)
+    const tip = m?.getTooltip()
+    const el = tip?.getElement?.()
+    if (!el) continue
+    el.classList.remove('is-collided')
+    const rect = el.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) continue
+    const collides = placed.some((r) => !(
+      rect.right < r.left ||
+      rect.left > r.right ||
+      rect.bottom < r.top ||
+      rect.top > r.bottom
+    ))
+    if (collides) {
+      el.classList.add('is-collided')
+    } else {
+      placed.push(rect)
+    }
+  }
 }
 
 // Per-leg polylines — uses the real OSRM road geometry when available,
@@ -1001,6 +1048,19 @@ const todayBanner = computed(() => {
 
 watch(() => todayBanner.value?.day, (d) => { ensurePlaceName(d) }, { immediate: true })
 
+// Banner dismissal — sticky for the session, keyed per voyage slug. The user
+// can re-open by reloading. Avoids the banner being a permanent strip eating
+// 40px on every tab switch.
+const bannerDismissKey = computed(() => `voyage-banner-dismissed:${props.slug}`)
+const bannerDismissed = ref(false)
+onMounted(() => {
+  bannerDismissed.value = sessionStorage.getItem(bannerDismissKey.value) === '1'
+})
+function dismissBanner() {
+  bannerDismissed.value = true
+  sessionStorage.setItem(bannerDismissKey.value, '1')
+}
+
 // Forecast for today's banner — populated lazily on day change.
 const bannerWx = ref(null)
 watch(
@@ -1249,6 +1309,32 @@ const hasContent = computed(() => {
   return ps.length > 0 || its.length > 0
 })
 
+// One-liner shown under the title: "22 days · T-8d · 2 516 km" — anchors the
+// user in the trip without forcing them to switch to the Itinerary tab.
+const headerSummary = computed(() => {
+  const stats = tripStats.value
+  if (!stats || (stats.days === 0 && stats.points === 0 && stats.trails === 0)) return ''
+  const t = today.value
+  const days = (mapData.value?.itinerary || [])
+    .filter((d) => d.date)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const future = days.find((d) => d.date >= t)
+  let countdown = ''
+  if (future) {
+    const diff = Math.round((new Date(future.date) - new Date(t)) / 86400000)
+    if (diff === 0) countdown = 'Today'
+    else if (diff > 0) countdown = `T-${diff}d`
+    else countdown = ''
+  }
+  const bits = []
+  if (stats.days) bits.push(`${stats.days} day${stats.days === 1 ? '' : 's'}`)
+  if (countdown) bits.push(countdown)
+  if (stats.points) bits.push(`${stats.points} pin${stats.points === 1 ? '' : 's'}`)
+  if (stats.trails) bits.push(`${stats.trails} trail${stats.trails === 1 ? '' : 's'}`)
+  return bits.join(' · ')
+})
+
 function collectFitCoords() {
   if (!mapData.value) return []
   const out = []
@@ -1315,7 +1401,7 @@ onBeforeUnmount(() => {
 .title { margin: 0; line-height: 0.94; }
 .title-input {
   font-family: var(--display);
-  font-size: 2.15rem;
+  font-size: 1.85rem;
   letter-spacing: 0.005em;
   color: var(--ink);
   background: transparent;
@@ -1329,31 +1415,33 @@ onBeforeUnmount(() => {
 .title-input:focus, .title-input:hover { border-bottom-color: var(--ink-faded); }
 .title-input::placeholder { color: var(--ink-faded); font-style: italic; text-transform: none; }
 
-.meta {
+.dock-head-row {
   display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
-  color: var(--ink-soft);
-  margin: 0.15rem 0 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
-.meta-icon { color: var(--vermillion); font-weight: 700; }
-
-.recenter {
-  margin-left: auto;
+.dock-head-actions { display: inline-flex; gap: 0.3rem; align-items: center; }
+.head-icon {
   background: transparent;
   border: 1px solid var(--cream-edge);
   border-radius: 3px;
-  font-size: 0.7rem;
-  padding: 0.15rem 0.45rem;
+  width: 2rem; height: 2rem;
+  display: grid; place-items: center;
+  font-size: 0.85rem;
   color: var(--ink-soft);
   cursor: pointer;
-  letter-spacing: 0.04em;
   transition: color 90ms, border-color 90ms;
 }
-.recenter:hover { color: var(--vermillion); border-color: var(--vermillion); }
+.head-icon:hover { color: var(--vermillion); border-color: var(--vermillion); }
+
+.head-summary {
+  margin: 0.25rem 0 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
 
 .dock-back {
   display: inline-block;
@@ -1362,8 +1450,6 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
   color: var(--ink-faded);
   text-decoration: none;
-  margin-bottom: 0.35rem;
-  align-self: flex-start;
 }
 .dock-back:hover { color: var(--vermillion); }
 
@@ -1484,18 +1570,42 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   z-index: 700;
   display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
+  align-items: stretch;
   background: var(--ink);
   color: var(--paper);
-  padding: 0.5rem 0.9rem 0.5rem 0.5rem;
   border-radius: 4px;
-  cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   max-width: 80%;
-  white-space: nowrap;
   overflow: hidden;
 }
+.banner-main {
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0.5rem 0.7rem 0.5rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  font: inherit;
+  text-align: left;
+}
+.banner-main:hover { background: rgba(255,255,255,0.06); }
+.banner-action,
+.banner-close {
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(255,255,255,0.1);
+  color: var(--cream);
+  width: 2.2rem;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+.banner-action:hover { background: var(--vermillion-deep); color: var(--paper); }
+.banner-close:hover { background: rgba(255,255,255,0.12); color: var(--paper); }
 .banner-tag {
   display: inline-block;
   background: var(--vermillion);
@@ -1521,7 +1631,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.today-banner:hover { background: var(--vermillion-deep); }
 
 .candidate-modal {
   width: min(560px, 100%);
@@ -1584,5 +1693,13 @@ onBeforeUnmount(() => {
 .leg-label.is-est {
   border-style: dashed;
   opacity: 0.85;
+}
+
+/* Day-pin label collision: when two permanent tooltips overlap, the later
+   one (in trip order) gets `.is-collided` and we hide just the label —
+   the numbered pin underneath stays visible. */
+.iti-tip.is-collided {
+  visibility: hidden;
+  pointer-events: none;
 }
 </style>

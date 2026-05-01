@@ -19,7 +19,8 @@
     <p v-else class="comment muted"><em>No notes yet.</em></p>
 
     <p class="coord meta">
-      {{ formatLat(point.lat) }} · {{ formatLng(point.lng) }}
+      <span v-if="placeName" class="place-name">{{ placeName }}</span>
+      <span class="coord-text">{{ formatLat(point.lat) }} · {{ formatLng(point.lng) }}</span>
     </p>
 
     <button class="btn directions" type="button" @click="onDirections">Directions →</button>
@@ -32,14 +33,35 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { CATEGORIES, formatLat, formatLng, openInMaps, parseGPX } from '@/util.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
+import { reverseGeocode } from '@/api.js'
 
 const props = defineProps({
   point: { type: Object, required: true },
 })
 defineEmits(['edit', 'delete', 'close'])
+
+// Reverse-geocoded place name — useful for trail-finder pins (no GPX) where
+// coords alone leave you wondering "where exactly is this?". Cached per
+// point id since the user may flip between cards.
+const placeNameCache = new Map()
+const placeName = ref('')
+async function resolvePlaceName(p) {
+  placeName.value = ''
+  if (!p) return
+  if (placeNameCache.has(p.id)) {
+    placeName.value = placeNameCache.get(p.id)
+    return
+  }
+  const name = await reverseGeocode(p.lat, p.lng)
+  if (name && p.id === props.point.id) {
+    placeNameCache.set(p.id, name)
+    placeName.value = name
+  }
+}
+watch(() => props.point.id, () => resolvePlaceName(props.point), { immediate: true })
 
 const fallback = CATEGORIES[CATEGORIES.length - 1]
 const cat = computed(() => CATEGORIES.find((c) => c.key === props.point.category) || fallback)
@@ -119,7 +141,14 @@ function onDirections() {
 }
 .comment.muted { color: var(--ink-faded); }
 
-.meta { margin: 0; font-size: 0.78rem; }
+.meta {
+  margin: 0;
+  font-size: 0.78rem;
+  display: grid;
+  gap: 0.1rem;
+}
+.place-name { color: var(--ink-soft); font-weight: 500; }
+.coord-text { color: var(--ink-faded); font-family: var(--mono); font-size: 0.7rem; }
 
 .trail-line {
   margin: 0;

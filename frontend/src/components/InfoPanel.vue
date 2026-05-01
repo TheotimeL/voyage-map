@@ -45,7 +45,13 @@ function rail(key) {
 
 function onMobileTab(key) {
   emit('update:active', key)
-  sheetRef.value?.promoteFromPeek?.()
+  // Itinerary needs the full sheet on mobile — at half height a 22-day list
+  // shows about one row, which is unusable. Other tabs are happy at half.
+  if (key === 'itinerary') {
+    sheetRef.value?.setState?.('full')
+  } else {
+    sheetRef.value?.promoteFromPeek?.()
+  }
 }
 </script>
 
