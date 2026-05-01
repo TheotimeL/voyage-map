@@ -200,6 +200,15 @@
         @hover="onElevHover"
         @close="activeTrailPointId = null"
       />
+
+      <!-- Soft-delete toast: anchored bottom-centre on the map. Both pin and
+           day deletes funnel through here so the undo affordance is uniform. -->
+      <Transition name="toast">
+        <div v-if="pendingDelete" class="del-toast" role="status" aria-live="polite">
+          <span class="del-toast-text">{{ pendingDelete.message }}</span>
+          <button type="button" class="del-toast-undo mono" @click="undoDelete">Undo</button>
+        </div>
+      </Transition>
     </div>
 
     <PointFormModal
@@ -1044,20 +1053,80 @@ function onEdit() {
 
 async function onDeleteDetail() {
   if (!detail.value?.id) return
-  await deletePoint(detail.value.id)
+  // Soft-delete: hide locally now, fire the server DELETE in 5s unless the
+  // user clicks Undo. Avoids a confirm() dialog (bad UX for one-tap pin work)
+  // while still being recoverable.
+  const point = detail.value
   detail.value = null
   activeId.value = null
+  scheduleSoftDelete({
+    kind: 'point',
+    message: `Pin "${point.title || 'untitled'}" deleted`,
+    hide: () => removePointMarker(point.id),
+    restore: () => addPointMarker(point),
+    commit: () => api.deletePoint(props.slug, point.id),
+    onCommit: () => {
+      mapData.value.points = mapData.value.points.filter((p) => p.id !== point.id)
+    },
+  })
 }
 
-async function deletePoint(id) {
+// Shared soft-delete state — only one delete can be pending at a time. If a
+// new delete fires while one is pending, the previous one commits immediately
+// (its server call still races; the user has already moved on).
+const pendingDelete = ref(null)
+let _pendingTimer = null
+let _pendingResolved = false
+
+function scheduleSoftDelete({ kind, message, hide, restore, commit, onCommit }) {
+  // Flush any in-flight pending delete before starting a new one — we can
+  // only show one toast at a time and the previous user has already moved on.
+  if (pendingDelete.value && !_pendingResolved) {
+    finalizeSoftDelete(/* commitNow */ true)
+  }
+  hide()
+  _pendingResolved = false
+  pendingDelete.value = { kind, message, hide, restore, commit, onCommit }
+  _pendingTimer = setTimeout(() => finalizeSoftDelete(true), 5000)
+}
+
+async function finalizeSoftDelete(shouldCommit) {
+  if (!pendingDelete.value || _pendingResolved) return
+  const entry = pendingDelete.value
+  _pendingResolved = true
+  if (_pendingTimer) { clearTimeout(_pendingTimer); _pendingTimer = null }
+  pendingDelete.value = null
+  if (!shouldCommit) {
+    // Undo path: restore the visible state.
+    try { entry.restore() } catch (e) { error.value = e?.message || 'Could not restore.' }
+    return
+  }
   try {
-    await api.deletePoint(props.slug, id)
-    mapData.value.points = mapData.value.points.filter((p) => p.id !== id)
-    removePointMarker(id)
+    await entry.commit()
+    if (entry.onCommit) entry.onCommit()
   } catch (e) {
-    error.value = e.message
+    // Server rejected the delete — restore so the UI matches reality.
+    try { entry.restore() } catch { /* swallow */ }
+    error.value = e?.message || 'Could not delete.'
   }
 }
+
+function undoDelete() { finalizeSoftDelete(false) }
+
+onBeforeUnmount(() => {
+  // If we leave the page mid-undo-window, commit so the server stays in sync
+  // with what the user already saw disappear.
+  if (_pendingTimer) clearTimeout(_pendingTimer)
+  if (pendingDelete.value && !_pendingResolved) {
+    const entry = pendingDelete.value
+    _pendingResolved = true
+    pendingDelete.value = null
+    entry.commit().catch(() => { /* best-effort */ })
+    if (entry.onCommit) {
+      try { entry.onCommit() } catch { /* swallow */ }
+    }
+  }
+})
 
 function startNewPin() {
   // Toggle drop-mode: next click on the map places the pin where the user
@@ -1468,10 +1537,25 @@ async function onAddDaysBulk(payload) {
 }
 
 async function onDeleteDay(day) {
-  try {
-    await api.deleteItineraryDay(props.slug, day.id)
-    mapData.value.itinerary = mapData.value.itinerary.filter((d) => d.id !== day.id)
-  } catch (e) { error.value = e.message }
+  // Soft-delete with the same 5s undo toast as pins, so day removal is
+  // recoverable and consistent. The full day record (including any attached
+  // pin links — those references stay on the points; only the day row goes)
+  // is captured for restoration if Undo is hit.
+  const snapshot = { ...day }
+  scheduleSoftDelete({
+    kind: 'day',
+    message: `Day "${day.label || day.date}" deleted`,
+    hide: () => {
+      mapData.value.itinerary = mapData.value.itinerary.filter((d) => d.id !== day.id)
+    },
+    restore: () => {
+      // Re-insert with the original date so sorting puts it back where it was.
+      mapData.value.itinerary = [...mapData.value.itinerary, snapshot]
+        .sort((a, b) => a.date.localeCompare(b.date))
+    },
+    commit: () => api.deleteItineraryDay(props.slug, day.id),
+    onCommit: () => { /* hide() already removed it from local state */ },
+  })
 }
 
 async function onAttachPoint({ pointId, dayId }) {
@@ -2142,6 +2226,53 @@ onBeforeUnmount(() => {
 }
 .cand-coord { font-size: 0.72rem; color: var(--ink-soft); }
 .row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.4rem; }
+
+/* Soft-delete toast — bottom-centre of the map. Stays in the cream/ink/
+   vermillion palette; the Undo button is the click target so users can
+   recover without thinking. 5s lifespan, configurable in script. */
+.del-toast {
+  position: absolute;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 4px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  max-width: calc(100% - 2rem);
+  overflow: hidden;
+}
+.del-toast-text {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.del-toast-undo {
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--vermillion);
+  color: var(--paper);
+  padding: 0 0.95rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.del-toast-undo:hover { background: var(--vermillion-deep); }
+.toast-enter-active, .toast-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.toast-enter-from, .toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
 
 </style>
 

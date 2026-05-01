@@ -546,7 +546,9 @@ function onAddPick(result) {
 }
 
 function del(d) {
-  if (confirm(`Remove ${d.label || 'this day'}?`)) emit('delete', d)
+  // No confirm() — MapView handles a 5s undo toast instead. Keeps deletes
+  // single-tap-recoverable and consistent with pin delete UX.
+  emit('delete', d)
 }
 
 function goToday() {
