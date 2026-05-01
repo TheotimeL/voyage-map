@@ -151,6 +151,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true))
 
 @media (max-width: 720px) {
   .map-fab-wrap { bottom: 80px; }
-  .fab-menu { width: 240px; }
+  .fab-menu { width: 260px; padding: 0.7rem 0.55rem 0.6rem; }
+  /* Each menu row hits at least a 56-px tap area. The display strong is
+     bumped to 1.05rem; em descriptions stay smaller so the row reads as
+     "label · explanation" instead of two equal lines. */
+  .fab-menu-item { padding: 0.7rem 0.6rem; min-height: 56px; }
+  .fab-menu-icon { font-size: 1.45rem; }
+  .fab-menu-text strong { font-size: 1.05rem; }
+  .fab-menu-text em { font-size: 0.78rem; }
 }
 </style>

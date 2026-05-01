@@ -1,8 +1,10 @@
 <template>
   <div class="point-list-wrap">
-    <p v-if="points.length === 0" class="empty">
-      <em>No marks yet. Click the map to drop one.</em>
-    </p>
+    <div v-if="points.length === 0" class="empty-card">
+      <p class="empty-eyebrow mono">№ 003 · Wishlist</p>
+      <h4 class="empty-title">Empty list.</h4>
+      <p class="empty-hint mono">Drop a pin from the map, or paste a link.</p>
+    </div>
     <template v-else>
       <section v-for="g in groups" :key="g.key" class="group">
         <h5 v-if="g.title" class="group-title mono">{{ g.title }} · {{ g.items.length }}</h5>
@@ -122,10 +124,38 @@ function trailStats(p) {
   display: grid;
   gap: 0.55rem;
 }
-.empty {
-  font-family: var(--body);
+/* Empty-list card — editorial-cartographer style: cream/ink only, no
+   vermillion accent, eyebrow + display-font line + mono one-liner hint. */
+.empty-card {
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
+  border-radius: 3px;
+  padding: 1rem 0.95rem 1.05rem;
+  display: grid;
+  gap: 0.25rem;
+  text-align: left;
+}
+.empty-eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
   color: var(--ink-faded);
-  padding: 1rem 0.2rem;
+}
+.empty-title {
+  font-family: var(--display);
+  margin: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+  text-transform: uppercase;
+}
+.empty-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 .point {
   display: grid;
