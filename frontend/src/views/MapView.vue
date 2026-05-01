@@ -112,16 +112,25 @@
     >
       <div v-if="todayBanner && !bannerDismissed" class="today-banner">
         <button class="banner-main" type="button" :title="`Center on ${todayBanner.day.label || 'this day'}`" @click="onGoDay(todayBanner.day)">
-          <span class="banner-tag mono">{{ todayBanner.tag }}</span>
-          <span class="banner-text">{{ todayBanner.text }}</span>
-          <span v-if="bannerWx" class="banner-wx mono">
-            {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
-          </span>
-          <span v-if="todayBanner.sun" class="banner-sun mono">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
-          <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
+          <div class="banner-row banner-row-primary">
+            <span class="banner-tag mono">{{ todayBanner.tag }}</span>
+            <span class="banner-text">{{ todayBanner.text }}</span>
+          </div>
+          <div
+            v-if="bannerWx || todayBanner.sun || todayBanner.notes"
+            class="banner-row banner-row-meta mono"
+          >
+            <span v-if="bannerWx" class="banner-wx">
+              {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
+            </span>
+            <span v-if="todayBanner.sun" class="banner-sun">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
+            <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
+          </div>
         </button>
-        <button class="banner-action" type="button" title="Edit this day" @click="editingDay = todayBanner.day">✎</button>
-        <button class="banner-close" type="button" title="Hide for this session" @click="dismissBanner">×</button>
+        <div class="banner-actions">
+          <button class="banner-action" type="button" title="Edit this day" @click="editingDay = todayBanner.day">✎</button>
+          <button class="banner-close" type="button" title="Hide for this session" @click="dismissBanner">×</button>
+        </div>
       </div>
 
       <div ref="mapEl" class="map"></div>
@@ -1701,7 +1710,9 @@ onBeforeUnmount(() => {
 }
 .link-pick:hover { color: var(--vermillion-deep); }
 
-/* Today banner */
+/* Today banner — 2-line stack: primary row (tag + name) carries the
+   editorial weight, meta row (weather/sun/notes) sits below in a quieter
+   mono color so the banner reads as half its previous height. */
 .today-banner {
   position: absolute;
   top: 1rem;
@@ -1721,17 +1732,28 @@ onBeforeUnmount(() => {
   background: transparent;
   border: none;
   color: inherit;
-  padding: 0.5rem 0.7rem 0.5rem 0.5rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
+  padding: 0.4rem 0.7rem 0.4rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
   cursor: pointer;
-  white-space: nowrap;
   overflow: hidden;
   font: inherit;
   text-align: left;
+  min-width: 0;
 }
 .banner-main:hover { background: rgba(255,255,255,0.06); }
+.banner-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+.banner-row-meta { gap: 0.7rem; }
+.banner-actions { display: inline-flex; }
 .banner-action,
 .banner-close {
   background: transparent;
@@ -1749,9 +1771,9 @@ onBeforeUnmount(() => {
   display: inline-block;
   background: var(--vermillion);
   color: var(--paper);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   letter-spacing: 0.16em;
-  padding: 0.18rem 0.55rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 2px;
   font-weight: 700;
 }
@@ -1759,16 +1781,24 @@ onBeforeUnmount(() => {
   font-family: var(--display);
   font-size: 1rem;
   letter-spacing: 0.04em;
-}
-.banner-sun { font-size: 0.78rem; color: var(--ink-soft); }
-.banner-wx { font-size: 0.82rem; color: var(--paper); font-weight: 600; }
-.banner-notes {
-  font-family: var(--body);
-  font-size: 0.85rem;
-  color: var(--cream);
-  opacity: 0.8;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.banner-sun,
+.banner-wx,
+.banner-notes {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.65);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.banner-notes {
+  font-family: var(--body);
+  letter-spacing: 0.01em;
+  color: rgba(255,255,255,0.55);
+  font-style: italic;
 }
 
 .candidate-modal {
