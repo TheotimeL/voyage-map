@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import text
+
 from api.geocode import router as geocode_router
 from api.itinerary import router as itinerary_router
 from api.maps import router as maps_router
@@ -27,9 +29,24 @@ from services.db import Base, engine
 logger = logging.getLogger(__name__)
 
 
+def _migrate_inline() -> None:
+    """Idempotent SQLite schema patches.
+
+    `Base.metadata.create_all` adds new tables but never new columns. Each
+    block here checks `PRAGMA table_info` and only ALTERs when the column is
+    missing — safe to run on every boot.
+    """
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(points)"))}
+        if "itinerary_day_id" not in cols:
+            conn.execute(text("ALTER TABLE points ADD COLUMN itinerary_day_id INTEGER REFERENCES itinerary_days(id)"))
+            logger.info("Migrated: added points.itinerary_day_id")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _migrate_inline()
     logger.info("Voyage Map API ready.")
     yield
 

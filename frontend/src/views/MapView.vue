@@ -34,7 +34,17 @@
           ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
         </button>
         <p v-if="locateError" class="error sm">{{ locateError }}</p>
-        <CategoryFilters :points="mapData.points" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
+        <div class="pins-filter mono">
+          <button
+            type="button"
+            class="filter-toggle"
+            :class="{ on: showAllPins }"
+            :title="showAllPins ? 'Hide pins already attached to a day' : 'Show all pins, including those attached to days'"
+            @click="showAllPins = !showAllPins"
+          >{{ showAllPins ? '✓ Showing all' : 'Wishlist only' }}</button>
+          <span class="filter-meta">{{ pinsTabPoints.length }} of {{ (mapData.points || []).length }}</span>
+        </div>
+        <CategoryFilters :points="pinsTabPoints" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
         <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
         <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
         <p class="hint mono gpx-hint">
@@ -51,6 +61,7 @@
       <template #itinerary>
         <Itinerary
           :days="mapData.itinerary || []"
+          :points="mapData.points || []"
           :bias="searchBias"
           :slug="props.slug"
           @add="onAddDay"
@@ -59,6 +70,9 @@
           @delete="onDeleteDay"
           @go="onGoDay"
           @edit="(d) => editingDay = d"
+          @select-point="onSelectPoint"
+          @attach="onAttachPoint"
+          @detach="onDetachPoint"
         />
       </template>
       <template #more>
@@ -108,10 +122,10 @@
       </button>
 
       <MapFab
-        :glyph="dropMode ? '×' : '+'"
-        :title="dropMode ? 'Click the map to drop — or × to cancel' : 'Drop a pin'"
-        :class="{ 'is-armed': dropMode }"
-        @click="startNewPin"
+        :armed="dropMode"
+        @drop="onFabDrop"
+        @search="onFabSearch"
+        @day="onFabDay"
       />
       <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
 
@@ -216,12 +230,13 @@ const mapData = ref(null)
 const loading = ref(true)
 const error = ref('')
 const titleDraft = ref('')
-const activeTab = ref('places')
+const activeTab = ref('itinerary')
 const tabs = [
-  { key: 'places', label: 'Places', icon: '📍' },
-  { key: 'itinerary', label: 'Itinerary', icon: '🗓' },
+  { key: 'itinerary', label: 'Trip', icon: '🗓' },
+  { key: 'places', label: 'Pins', icon: '📍' },
   { key: 'more', label: 'Tools', icon: '⋯' },
 ]
+// Default to the Trip tab — users open the app to plan, not to browse pins.
 const activeId = ref(null)
 const modal = ref(null)
 const detail = ref(null)
@@ -344,11 +359,23 @@ const tripStats = computed(() => {
   }
 })
 
+// "Wishlist only" toggle — when off, the Pins tab hides points already
+// attached to an itinerary day (since those live under the Trip tab now).
+const showAllPins = ref(false)
+
+// Pool the Pins tab works from — wishlist (unattached) by default.
+const pinsTabPoints = computed(() => {
+  if (!mapData.value) return []
+  if (showAllPins.value) return mapData.value.points
+  return (mapData.value.points || []).filter((p) => p.itinerary_day_id == null)
+})
+
 const visiblePoints = computed(() => {
   if (!mapData.value) return []
+  const pool = pinsTabPoints.value
   const filtered = hiddenCats.value.size === 0
-    ? mapData.value.points
-    : mapData.value.points.filter((p) => !hiddenCats.value.has(p.category))
+    ? pool
+    : pool.filter((p) => !hiddenCats.value.has(p.category))
   // When the user has shared their location, sort by ascending distance —
   // most relevant places first.
   if (myLocation.value) {
@@ -879,6 +906,27 @@ function startNewPin() {
   if (dropMode.value) detail.value = null
 }
 
+// FAB popover routes — each picks one entry point and focuses the right
+// control so the user lands ready to type.
+function onFabDrop({ cancel }) {
+  if (cancel) {
+    dropMode.value = false
+    return
+  }
+  detail.value = null
+  dropMode.value = true
+}
+async function onFabSearch() {
+  activeTab.value = 'places'
+  await nextTick()
+  document.querySelector('.tab-content input[type="text"], .tab-content input.field')?.focus()
+}
+async function onFabDay() {
+  activeTab.value = 'itinerary'
+  await nextTick()
+  document.querySelector('.tab-content .add-date')?.focus()
+}
+
 function onSelectPoint(p) {
   openDetail(p)
   if (p.gpx_data) {
@@ -1124,6 +1172,20 @@ async function onDeleteDay(day) {
   try {
     await api.deleteItineraryDay(props.slug, day.id)
     mapData.value.itinerary = mapData.value.itinerary.filter((d) => d.id !== day.id)
+  } catch (e) { error.value = e.message }
+}
+
+async function onAttachPoint({ pointId, dayId }) {
+  await patchPointDay(pointId, dayId)
+}
+async function onDetachPoint(pointId) {
+  await patchPointDay(pointId, null)
+}
+async function patchPointDay(pointId, dayId) {
+  try {
+    const updated = await api.patchPoint(props.slug, pointId, { itinerary_day_id: dayId })
+    const idx = mapData.value.points.findIndex((p) => p.id === pointId)
+    if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
   } catch (e) { error.value = e.message }
 }
 
@@ -1453,6 +1515,35 @@ onBeforeUnmount(() => {
 }
 .dock-back:hover { color: var(--vermillion); }
 
+.pins-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px dotted var(--cream-edge);
+  margin-bottom: 0.4rem;
+}
+.filter-toggle {
+  background: transparent;
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.filter-toggle:hover { color: var(--ink); border-color: var(--ink); }
+.filter-toggle.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.filter-meta {
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-faded);
+}
+
 .locate-link {
   background: transparent;
   border: none;
@@ -1548,10 +1639,6 @@ onBeforeUnmount(() => {
 @keyframes drop-hint-pop {
   from { opacity: 0; transform: translateX(8px); }
   to { opacity: 1; transform: translateX(0); }
-}
-:deep(.map-fab.is-armed) {
-  background: var(--ink) !important;
-  box-shadow: 0 0 0 4px var(--vermillion), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
 }
 .link-pick {
   cursor: pointer;

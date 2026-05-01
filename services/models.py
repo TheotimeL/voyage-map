@@ -47,6 +47,12 @@ class Point(Base):
     category: Mapped[str] = mapped_column(String(20), default="note")
     gpx_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # When set, this pin/trail is "attached" to a specific itinerary day.
+    # Detaching is handled on day-delete via api/itinerary.py — we don't rely
+    # on SQLite's FK ON DELETE SET NULL since foreign_keys pragma isn't on.
+    itinerary_day_id: Mapped[int | None] = mapped_column(
+        ForeignKey("itinerary_days.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     map: Mapped[Map] = relationship(back_populates="points")

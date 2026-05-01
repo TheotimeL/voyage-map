@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from services.db import get_db
-from services.models import ItineraryDay, Map
+from services.models import ItineraryDay, Map, Point
 from services.schemas import ItineraryDayIn, ItineraryDayOut, ItineraryDayPatch
 
 router = APIRouter(prefix="/maps/{slug}/itinerary", tags=["itinerary"])
@@ -64,6 +64,11 @@ def delete_day(slug: str, day_id: int, db: Session = Depends(get_db)):
     d = db.query(ItineraryDay).filter(ItineraryDay.id == day_id, ItineraryDay.map_id == m.id).first()
     if d is None:
         raise HTTPException(404, "Day not found")
+    # SQLite's ON DELETE SET NULL won't fire (foreign_keys pragma is off), so
+    # detach attached points manually before removing the row.
+    db.query(Point).filter(Point.itinerary_day_id == d.id).update(
+        {Point.itinerary_day_id: None}, synchronize_session=False,
+    )
     db.delete(d)
     db.commit()
 
@@ -71,5 +76,10 @@ def delete_day(slug: str, day_id: int, db: Session = Depends(get_db)):
 @router.delete("", status_code=204)
 def clear_itinerary(slug: str, db: Session = Depends(get_db)):
     m = _get_map_or_404(db, slug)
+    day_ids = [d.id for d in db.query(ItineraryDay.id).filter(ItineraryDay.map_id == m.id).all()]
+    if day_ids:
+        db.query(Point).filter(Point.itinerary_day_id.in_(day_ids)).update(
+            {Point.itinerary_day_id: None}, synchronize_session=False,
+        )
     db.query(ItineraryDay).filter(ItineraryDay.map_id == m.id).delete()
     db.commit()

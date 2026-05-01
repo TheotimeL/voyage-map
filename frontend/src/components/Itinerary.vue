@@ -46,6 +46,12 @@
           </div>
           <div class="iti-actions">
             <button
+              class="iti-icon"
+              type="button"
+              :title="`Attach a pin to Day ${r.dayIndex}`"
+              @click="attachOpenForDay = attachOpenForDay === r.day.id ? null : r.day.id"
+            >+</button>
+            <button
               v-if="r.day.lat != null && r.day.lng != null"
               class="iti-icon"
               type="button"
@@ -56,6 +62,36 @@
             <button class="iti-icon" type="button" :title="`Remove day ${r.dayIndex}`" @click="del(r.day)">×</button>
           </div>
         </li>
+        <ul v-if="(pinsByDay.get(r.day.id) || []).length || attachOpenForDay === r.day.id" class="day-pins">
+          <li v-for="p in (pinsByDay.get(r.day.id) || [])" :key="p.id" class="day-pin" @click.stop="$emit('select-point', p)">
+            <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
+            <span class="day-pin-title">{{ p.title || 'Untitled' }}</span>
+            <button
+              type="button"
+              class="day-pin-detach"
+              title="Detach from this day"
+              @click.stop="$emit('detach', p.id)"
+            >−</button>
+          </li>
+          <li v-if="attachOpenForDay === r.day.id" class="day-pin-picker">
+            <p v-if="!unattachedPins.length" class="picker-empty mono">
+              No unattached pins. Drop one on the map first.
+              <button type="button" class="picker-cancel" @click="attachOpenForDay = null">cancel</button>
+            </p>
+            <template v-else>
+              <p class="picker-eyebrow mono">Attach a pin to Day {{ r.dayIndex }}</p>
+              <ul class="picker-list">
+                <li v-for="p in unattachedPins" :key="p.id">
+                  <button type="button" class="picker-item" @click.stop="pickAttach(r.day.id, p.id)">
+                    <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
+                    <span>{{ p.title }}</span>
+                  </button>
+                </li>
+              </ul>
+              <button type="button" class="picker-cancel mono" @click="attachOpenForDay = null">cancel</button>
+            </template>
+          </li>
+        </ul>
         <div
           v-if="r.legNext && r.legNext.km != null"
           class="iti-leg mono"
@@ -107,7 +143,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { todayISO } from '@/util.js'
+import { CATEGORIES, todayISO } from '@/util.js'
 import { dailyForecast, glyphFor } from '@/lib/weather.js'
 import GeocoderSearch from './GeocoderSearch.vue'
 import PasteImportModal from './PasteImportModal.vue'
@@ -116,10 +152,41 @@ import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
+  points: { type: Array, default: () => [] },
   bias: { type: Object, default: null },
   slug: { type: String, default: null },
 })
-const emit = defineEmits(['add', 'add-bulk', 'add-trail-pin', 'delete', 'go', 'edit'])
+const emit = defineEmits([
+  'add', 'add-bulk', 'add-trail-pin', 'delete', 'go', 'edit',
+  'select-point', 'attach', 'detach',
+])
+
+const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
+function pinEmoji(p) { return p?.gpx_data ? '🥾' : (emojiByCategory[p?.category] || '📍') }
+
+// Per-day attached pins, keyed by day id. Each list keeps insertion order
+// (= creation time on the backend, which matches when the user attached it).
+const pinsByDay = computed(() => {
+  const map = new Map()
+  for (const p of props.points) {
+    if (p.itinerary_day_id == null) continue
+    const arr = map.get(p.itinerary_day_id) || []
+    arr.push(p)
+    map.set(p.itinerary_day_id, arr)
+  }
+  return map
+})
+const unattachedPins = computed(() =>
+  (props.points || []).filter((p) => p.itinerary_day_id == null && p.title),
+)
+
+// Open-state: when set, that day's "attach" picker is open. Clicking outside
+// or selecting a pin closes it.
+const attachOpenForDay = ref(null)
+function pickAttach(dayId, pointId) {
+  emit('attach', { pointId, dayId })
+  attachOpenForDay.value = null
+}
 
 const showPaste = ref(false)
 const defaultYear = computed(() => {
@@ -508,6 +575,123 @@ function legKm(a, b) {
   align-items: baseline;
   gap: 0.4rem;
 }
+
+/* Attached pins displayed inline under a day card. */
+.day-pins, .day-pin-add-only {
+  list-style: none;
+  margin: 0 0 0.4rem 2.6rem;
+  padding: 0.25rem 0 0.1rem;
+  display: grid;
+  gap: 0.15rem;
+  border-left: 2px solid var(--cream-edge);
+  padding-left: 0.6rem;
+}
+.day-pin-add-only { padding-bottom: 0.1rem; }
+.day-pin {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.45rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.15rem 0.2rem;
+  border-radius: 2px;
+}
+.day-pin:hover { background: var(--cream); color: var(--vermillion); }
+.day-pin-emoji { font-size: 0.9rem; }
+.day-pin-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.day-pin-detach {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+}
+.day-pin-detach:hover { color: var(--vermillion); }
+.day-pin-add-wrap { padding-top: 0.1rem; }
+.day-pin-add {
+  background: transparent;
+  border: 1px dashed var(--ink-faded);
+  border-radius: 2px;
+  color: var(--ink-faded);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+}
+.day-pin-add:hover { color: var(--vermillion); border-color: var(--vermillion); }
+
+.day-pin-picker {
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
+  border-radius: 3px;
+  padding: 0.4rem 0.5rem;
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.2rem 0;
+}
+.picker-eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.picker-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.15rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+.picker-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.25rem 0.3rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.picker-item:hover { background: var(--paper); color: var(--vermillion); }
+.picker-empty {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-faded);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+.picker-cancel {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  justify-self: end;
+  padding: 0.15rem 0.4rem;
+}
+.picker-cancel:hover { color: var(--vermillion); }
 .leg-est {
   font-size: 0.55rem;
   letter-spacing: 0.18em;
