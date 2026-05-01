@@ -777,8 +777,13 @@ function renderItinerary() {
 // Hide stacked permanent tooltips: walk markers in trip order and hide the
 // label of any whose rendered rect intersects an earlier (already-visible)
 // label. Leaves the day pin itself visible — only the text label is hidden.
+// Then sweep leg labels and hide any that overlap a still-visible day
+// tooltip — leg chips read as supporting info, so they yield to the pin.
 // Runs after every render and on zoom — collisions look different at every
 // zoom level.
+function rectsOverlap(a, b) {
+  return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom)
+}
 function hideOverlappingLabels() {
   if (!leaflet) return
   const placed = []
@@ -794,12 +799,22 @@ function hideOverlappingLabels() {
     el.classList.remove('is-collided')
     const rect = el.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) continue
-    const collides = placed.some((r) => !(
-      rect.right < r.left ||
-      rect.left > r.right ||
-      rect.bottom < r.top ||
-      rect.top > r.bottom
-    ))
+    const collides = placed.some((r) => rectsOverlap(rect, r))
+    if (collides) {
+      el.classList.add('is-collided')
+    } else {
+      placed.push(rect)
+    }
+  }
+  // Leg labels yield to: any visible pin tooltip AND any earlier-placed leg.
+  // Walk in array order so earlier (= earlier in trip) chips win ties.
+  for (const m of legLabelMarkers) {
+    const el = m?.getElement?.()
+    if (!el) continue
+    el.classList.remove('is-collided')
+    const rect = el.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) continue
+    const collides = placed.some((r) => rectsOverlap(rect, r))
     if (collides) {
       el.classList.add('is-collided')
     } else {
@@ -848,6 +863,12 @@ function clearLegLabels() {
     if (leaflet) leaflet.removeLayer(m)
   }
 }
+// Duration glyph stripped of its space ("4h30" instead of "4h 30") for the
+// dense/compact zooms. Falls back to the standard fmt for shorter legs.
+function fmtMinutesTight(min) {
+  const std = fmtMinutes(min)
+  return std.replace(/\s+/g, '')
+}
 function attachLegLabels(days) {
   clearLegLabels()
   if (!leaflet || days.length < 2) return
@@ -859,11 +880,18 @@ function attachLegLabels(days) {
     if (leg.km < 1) continue
     const midLat = (a.lat + b.lat) / 2
     const midLng = (a.lng + b.lng) / 2
-    const text = `${fmtMinutes(leg.minutes)} · ${leg.km} km`
+    // Duration always renders; km hides at low zoom via .leg-label-km. The
+    // tight formatting ("4h30") kicks in at dense/compact via CSS sibling
+    // pruning so the same span text reads as a single chip.
+    const tight = fmtMinutesTight(leg.minutes)
+    const html = `<div class="leg-label${leg.source === 'estimate' ? ' is-est' : ''}">` +
+      `<span class="leg-label-dur">${tight}</span>` +
+      `<span class="leg-label-km"> · ${leg.km} km</span>` +
+      `</div>`
     const m = L.marker([midLat, midLng], {
       icon: L.divIcon({
         className: 'leg-label-wrap',
-        html: `<div class="leg-label${leg.source === 'estimate' ? ' is-est' : ''}">${text}</div>`,
+        html,
         iconSize: null,
       }),
       interactive: false,

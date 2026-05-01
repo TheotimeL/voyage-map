@@ -265,14 +265,29 @@ input[type="range"]::-moz-range-thumb {
   border-color: var(--cream-edge);
 }
 
-/* Tier 1 — continental zoom (< 7): hide all permanent labels. */
-.leaflet-container.iti-dense .leaflet-tooltip.iti-tip,
-.leaflet-container.iti-dense .leg-label-wrap { display: none; }
+/* Tier 1 — continental zoom (< 7): hide pin tooltips, but keep a pared-back
+   leg chip (just the duration) so the user still feels the trip's tempo. */
+.leaflet-container.iti-dense .leaflet-tooltip.iti-tip { display: none; }
+.leaflet-container.iti-dense .leg-label-wrap .leg-label-km { display: none; }
+.leaflet-container.iti-dense .leg-label-wrap .leg-label {
+  font-size: 0.58rem;
+  padding: 0.04rem 0.26rem;
+  opacity: 0.85;
+}
 
-/* Tier 2 — regional zoom (7–8): tooltips show only "Day N", leg chips hide.
-   Trades full place names for a clean overview that reads at a glance. */
+/* Tier 2 — regional zoom (7–8): tooltips show only "Day N"; leg chips
+   shrink to duration-only (e.g. "4h30") to avoid clashing with the
+   tightly-packed numbered pins. */
 .leaflet-container.iti-compact .iti-tip .iti-tip-label { display: none; }
-.leaflet-container.iti-compact .leg-label-wrap { display: none; }
+.leaflet-container.iti-compact .leg-label-wrap .leg-label-km { display: none; }
+.leaflet-container.iti-compact .leg-label-wrap .leg-label {
+  font-size: 0.62rem;
+  padding: 0.04rem 0.28rem;
+}
+
+/* Hide a leg label that collides with an itinerary pin tooltip — set by
+   hideOverlappingLabels() so distant zooms don't overlap chips and tips. */
+.leg-label-wrap.is-collided { visibility: hidden; pointer-events: none; }
 
 /* Today: vermillion fill + concentric pulse so the active stop reads at a glance. */
 .iti-pin-wrapper.is-today .iti-pin {
