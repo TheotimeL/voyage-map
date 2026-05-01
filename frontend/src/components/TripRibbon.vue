@@ -1,5 +1,5 @@
 <template>
-  <nav v-if="rows.length" class="ribbon" aria-label="Trip overview">
+  <nav v-if="rows.length" ref="ribEl" class="ribbon" aria-label="Trip overview">
     <button
       v-for="r in rows"
       :key="r.day.id"
@@ -17,7 +17,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { todayISO } from '@/util.js'
 
 const props = defineProps({
@@ -26,6 +26,26 @@ const props = defineProps({
 defineEmits(['go'])
 
 const today = computed(() => todayISO())
+const ribEl = ref(null)
+
+// Center today's chip (or the next future stop, if today is between stops)
+// in the visible ribbon so users don't have to scroll right mid-trip. If
+// every stop is in the future the first chip stays at the left as-is.
+function scrollActiveIntoView() {
+  const root = ribEl.value
+  if (!root) return
+  const target = root.querySelector('.rib-stop.today')
+    || [...root.querySelectorAll('.rib-stop:not(.past)')][0]
+  if (!target) return
+  // Don't scroll if the active stop is already the first one — keep the
+  // natural left-anchored layout for pre-trip and just-started trips.
+  if (target === root.firstElementChild) return
+  const left = target.offsetLeft - root.clientWidth / 2 + target.clientWidth / 2
+  root.scrollTo({ left: Math.max(0, left), behavior: 'auto' })
+}
+
+onMounted(() => nextTick(scrollActiveIntoView))
+watch(() => props.days, () => nextTick(scrollActiveIntoView), { deep: true })
 
 const rows = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))

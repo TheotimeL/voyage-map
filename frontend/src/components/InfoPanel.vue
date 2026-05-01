@@ -64,6 +64,17 @@ function onMobileTab(key) {
   gap: 0.4rem;
 }
 .tab-content { flex: 1; overflow-y: auto; padding: 0.9rem 1rem 1rem; }
+/* Compact inputs inside the dock — the global .field is sized for modals/
+   full-page contexts; the side panel is tighter so we shave padding, drop
+   border to 1px, and dim the focus glow. */
+.tab-content :deep(.field) {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.88rem;
+  border-width: 1px;
+}
+.tab-content :deep(.field:focus) {
+  box-shadow: 0 0 0 2px rgba(232, 93, 60, 0.14);
+}
 .rail-icon {
   background: transparent; border: 1px solid transparent;
   font-size: 1.2rem; padding: 0.5rem; cursor: pointer; border-radius: 3px;

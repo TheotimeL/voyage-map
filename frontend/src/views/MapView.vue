@@ -2030,13 +2030,12 @@ onBeforeUnmount(() => {
 }
 .pins-search { flex: 1; min-width: 0; }
 .pins-locate {
-  width: 38px;
-  flex: 0 0 38px;
+  flex: 0 0 32px;
   background: var(--paper);
   border: 1px solid var(--cream-edge);
   border-radius: 3px;
   cursor: pointer;
-  font-size: 1.05rem;
+  font-size: 1rem;
   color: var(--vermillion);
   display: grid;
   place-items: center;

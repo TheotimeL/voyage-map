@@ -1266,15 +1266,8 @@ function legKm(a, b) {
   gap: 0.4rem;
 }
 .field.tiny { padding: 0.45rem 0.6rem; font-size: 0.88rem; }
-.field.add-date {
-  padding: 0.45rem 0.6rem;
-  font-size: 0.9rem;
-  height: 34px;
-  box-sizing: border-box;
-}
 .btn-add-mini {
-  width: 34px;
-  height: 34px;
+  width: 32px;
   display: grid;
   place-items: center;
   background: var(--paper);
@@ -1283,7 +1276,7 @@ function legKm(a, b) {
   border-radius: 3px;
   cursor: pointer;
   font-family: var(--display);
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
   line-height: 1;
   transition: background 90ms ease, color 90ms ease;
