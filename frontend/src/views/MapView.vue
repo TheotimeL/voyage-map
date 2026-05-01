@@ -1405,13 +1405,36 @@ const sunsetCountdown = computed(() => {
   return `${sign} ${h}h${m ? ' ' + m + 'm' : ''}`
 })
 
-// Bbox for the next leg — today/next stop pair, padded ~10% on each side so
-// the cached tiles include road context, not just the endpoints. Used by the
-// per-leg pre-cache option in MoreMenu.
+// "Upcoming leg" — the next pair of stops the user will drive between.
+// Works pre-trip (T-8d picks the first→second stop), mid-trip (today→next),
+// and gracefully returns null when there's nothing left to drive. The pair
+// is the first stop whose end_date >= today (call it B); the leg is
+// (the stop just before B, when there is one) → B. If B is the very first
+// stop, the leg is B → (the stop right after B) so we still get a valid bbox.
+const upcomingLegPair = computed(() => {
+  const sorted = [...(mapData.value?.itinerary || [])]
+    .filter((d) => d.lat != null && d.lng != null)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (sorted.length < 2) return null
+  const t = today.value
+  // Mid-trip: today is inside a stop, the leg is here→next.
+  if (todayBanner.value?.live && nextStop.value) {
+    return [todayBanner.value.day, nextStop.value]
+  }
+  // Find the first stop whose end_date is in the future (or today).
+  const idx = sorted.findIndex((d) => (d.end_date || d.date) >= t)
+  if (idx === -1) return null              // trip is already over
+  if (idx === 0) return [sorted[0], sorted[1]]   // pre-trip: first leg
+  return [sorted[idx - 1], sorted[idx]]    // about to drive prev→this
+})
+
+// Bbox for that upcoming leg, padded ~10% on each side so the cached tiles
+// include road context, not just the endpoints. Used by the per-leg
+// pre-cache option in MoreMenu.
 const nextLegBbox = computed(() => {
-  const here = todayBanner.value?.day
-  const there = nextStop.value
-  if (!here?.lat || !there?.lat) return null
+  const pair = upcomingLegPair.value
+  if (!pair) return null
+  const [here, there] = pair
   const minLat = Math.min(here.lat, there.lat)
   const maxLat = Math.max(here.lat, there.lat)
   const minLng = Math.min(here.lng, there.lng)
