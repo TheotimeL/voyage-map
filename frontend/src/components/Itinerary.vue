@@ -7,7 +7,7 @@
         type="button"
         :class="{ open: addOpen }"
         @click="addOpen = !addOpen"
-      >{{ addOpen ? '× Close' : '+ Add day' }}</button>
+      >{{ addOpen ? '× Close' : '+ Add stop' }}</button>
       <button class="btn btn-tiny btn-paste" type="button" @click="showPaste = true" title="Bulk import dates from a spreadsheet">Paste…</button>
     </div>
 
@@ -15,10 +15,10 @@
       <section v-if="addOpen" class="add-inline">
         <form class="iti-add" @submit.prevent="addEmptyDay">
           <input v-model="form.date" type="date" class="field add-date" :min="firstISO" required />
-          <button class="btn btn-add" type="submit" title="Add an empty day with no location">+ Day</button>
+          <button class="btn btn-add" type="submit" title="Add an empty stop with no location">+ Stop</button>
         </form>
         <GeocoderSearch
-          placeholder="…or search a place to drop on this day"
+          placeholder="…or search a place to drop on this date"
           :bias="bias"
           @pick="onAddPick"
         />
@@ -26,30 +26,27 @@
     </Transition>
 
     <p v-if="days.length" class="iti-meta mono">
-      {{ uniqueDateCount }} {{ uniqueDateCount === 1 ? 'day' : 'days' }}
-      <template v-if="todayDayNum"> · Day {{ todayDayNum }} / {{ uniqueDateCount }}</template>
+      {{ totalNights }} {{ totalNights === 1 ? 'day' : 'days' }} · {{ days.length }} {{ days.length === 1 ? 'stop' : 'stops' }}
+      <template v-if="todayDayNum"> · Day {{ todayDayNum }} / {{ totalNights }}</template>
       <template v-else-if="firstFutureIdx >= 0"> · {{ daysUntil(days[firstFutureIdx].date) }}</template>
       <template v-if="totalDriveKm > 0"> · {{ totalDriveKm.toLocaleString() }} km · {{ fmtMinutes(totalDriveMin) }} drive</template>
       <template v-else-if="totalKm > 0"> · ≈ {{ totalKm.toLocaleString() }} km</template>
     </p>
 
     <ol v-if="rows.length" class="iti-list">
-      <template v-for="(r, i) in rows" :key="r.day.id">
+      <template v-for="r in rows" :key="r.day.id">
         <li
           class="iti-day"
-          :class="{ today: isToday(r.day.date), past: isPast(r.day.date), future: isFuture(r.day.date), 'is-stop': !r.dateHead }"
+          :class="{ today: isTodayInRange(r.day), past: isPastStop(r.day), future: isFutureStop(r.day) }"
         >
-          <div v-if="r.dateHead" class="iti-date" :title="r.day.date">
+          <div class="iti-date" :title="r.spanISO">
             <span class="d-dow mono">{{ shortDow(r.day.date) }}</span>
             <span class="d-num">{{ shortDay(r.day.date) }}</span>
             <span class="d-mon mono">{{ shortMonth(r.day.date) }}</span>
           </div>
-          <div v-else class="iti-date is-cont" aria-hidden="true">
-            <span class="cont-rule"></span>
-          </div>
           <div class="iti-body">
             <button class="iti-label" type="button" @click="$emit('go', r.day)">
-              <span v-if="r.dateHead" class="day-num mono">DAY {{ r.dayIndex }}</span>
+              <span class="day-num mono">{{ r.dayLabel }}</span>
               <span class="day-label">{{ r.cleanLabel || 'Untitled' }}</span>
               <span v-if="r.day.lat == null" class="locate-hint" title="No location yet — click to search">⌖</span>
             </button>
@@ -67,18 +64,18 @@
             <button
               class="iti-icon"
               type="button"
-              :title="`Attach a pin to Day ${r.dayIndex}`"
+              :title="`Attach a pin to ${r.dayLabel}`"
               @click="attachOpenForDay = attachOpenForDay === r.day.id ? null : r.day.id"
             >+</button>
             <button
               v-if="r.day.lat != null && r.day.lng != null"
               class="iti-icon"
               type="button"
-              :title="`Find trails near ${r.day.label || 'this day'}`"
+              :title="`Find trails near ${r.day.label || 'this stop'}`"
               @click="trailFor = r.day"
             >🥾</button>
-            <button class="iti-icon" type="button" :title="`Edit day ${r.dayIndex}`" @click="$emit('edit', r.day)">✎</button>
-            <button class="iti-icon" type="button" :title="`Remove day ${r.dayIndex}`" @click="del(r.day)">×</button>
+            <button class="iti-icon" type="button" :title="`Edit ${r.dayLabel}`" @click="$emit('edit', r.day)">✎</button>
+            <button class="iti-icon" type="button" :title="`Remove ${r.dayLabel}`" @click="del(r.day)">×</button>
           </div>
         </li>
         <ul v-if="(pinsByDay.get(r.day.id) || []).length || attachOpenForDay === r.day.id" class="day-pins">
@@ -98,7 +95,7 @@
               <button type="button" class="picker-cancel" @click="attachOpenForDay = null">cancel</button>
             </p>
             <template v-else>
-              <p class="picker-eyebrow mono">Attach a pin to Day {{ r.dayIndex }}</p>
+              <p class="picker-eyebrow mono">Attach a pin to {{ r.dayLabel }}</p>
               <ul class="picker-list">
                 <li v-for="p in unattachedPins" :key="p.id">
                   <button type="button" class="picker-item" @click.stop="pickAttach(r.day.id, p.id)">
@@ -225,6 +222,8 @@ function onTrailPick(t) {
 
 const today = computed(() => todayISO())
 
+function endOf(d) { return d.end_date || d.date }
+
 function nextDateAfter(iso) {
   if (!iso) return today.value
   const d = new Date(iso)
@@ -234,7 +233,7 @@ function nextDateAfter(iso) {
 const suggestedNewDate = computed(() => {
   if (!props.days.length) return today.value
   const last = [...props.days].sort((a, b) => a.date.localeCompare(b.date)).at(-1)
-  return nextDateAfter(last.date)
+  return nextDateAfter(endOf(last))
 })
 
 // Lazy weather lookup for days within the forecast window. Stored as a
@@ -268,19 +267,39 @@ watch(() => props.days, (next) => {
 
 const firstISO = computed(() => '2020-01-01')
 
-const todayIdx = computed(() => props.days.findIndex((d) => d.date === today.value))
-const todayDay = computed(() => (todayIdx.value >= 0 ? props.days[todayIdx.value] : null))
-const firstFutureIdx = computed(() => props.days.findIndex((d) => d.date > today.value))
+// A stop is "today" when today is within [date, end_date] inclusive.
+const todayDay = computed(() => props.days.find((d) => today.value >= d.date && today.value <= endOf(d)) || null)
+const firstFutureIdx = computed(() => {
+  const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  return sorted.findIndex((d) => d.date > today.value)
+})
 
-// Unique calendar-date count — used in the meta line and "Day N / M" label.
-// Differs from days.length when the user has multiple stops on the same date.
-const uniqueDateCount = computed(() => new Set(props.days.map((d) => d.date)).size)
+// Total number of trip-days (sum of every stop's span). "1-day per stop" → days
+// equals stops; multi-day stops add their full span.
+const totalNights = computed(() => {
+  let n = 0
+  for (const d of props.days) n += daysInSpan(d.date, endOf(d))
+  return n
+})
 const todayDayNum = computed(() => {
   const t = today.value
-  const dates = [...new Set(props.days.map((d) => d.date))].sort()
-  const idx = dates.indexOf(t)
-  return idx >= 0 ? idx + 1 : 0
+  const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  let n = 0
+  for (const d of sorted) {
+    const span = daysInSpan(d.date, endOf(d))
+    if (t >= d.date && t <= endOf(d)) {
+      const offset = daysBetween(d.date, t)
+      return n + offset + 1
+    }
+    n += span
+  }
+  return 0
 })
+
+function daysBetween(a, b) {
+  return Math.round((new Date(b) - new Date(a)) / 86400000)
+}
+function daysInSpan(start, end) { return daysBetween(start, end) + 1 }
 
 const totalKm = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
@@ -292,42 +311,35 @@ const totalKm = computed(() => {
   return sum
 })
 
-// Render rows: sorted by date with two derived flags per row.
-//   dateHead: true on the first row of each calendar date — controls whether
-//     the date badge column is shown (continuation rows render a hairline rule)
+// Render rows: one row per stop, sorted by start date. Each stop owns its
+// full span; the day chip reads "DAY N" for single-day stops and "DAY N–M"
+// for multi-day stops.
 //   cleanLabel: strip a leading "Day N — " from any user-typed label so we
 //     don't double-print the day number in the body
-//   legNext: only set when the next row is on a *different* date AND both
-//     sides have coords — silences the noisy "↓ 0 km" leg between same-day
-//     stops (e.g. Vegas → Excalibur Hotel on day 1).
+//   legNext: distance + drive estimate to the next stop (when both have coords)
 const rows = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
-  // Number unique calendar dates, not rows — two stops on the same date share
-  // their Day N. So "Day 1: Vegas" + "Day 1: Excalibur Hotel" both render Day 1.
-  const dayOfTrip = new Map()
-  let n = 0
-  for (const d of sorted) {
-    if (!dayOfTrip.has(d.date)) {
-      n += 1
-      dayOfTrip.set(d.date, n)
-    }
-  }
   const out = []
+  let cumulative = 0
   for (let i = 0; i < sorted.length; i++) {
     const day = sorted[i]
-    const prev = i > 0 ? sorted[i - 1] : null
     const next = i < sorted.length - 1 ? sorted[i + 1] : null
-    const dateHead = !prev || prev.date !== day.date
+    const span = daysInSpan(day.date, endOf(day))
+    const startNum = cumulative + 1
+    const endNum = cumulative + span
+    const dayLabel = span > 1 ? `DAY ${startNum}–${endNum}` : `DAY ${startNum}`
+    const spanISO = span > 1 ? `${day.date} → ${endOf(day)}` : day.date
     const cleanLabel = day.label
-      ? day.label.replace(/^\s*Day\s*\d+\s*[—\-–:·]\s*/i, '').trim()
+      ? day.label.replace(/^\s*Day\s*\d+(?:\s*[—\-–]\s*\d+)?\s*[—\-–:·]\s*/i, '').trim()
       : ''
     let legNext = null
-    if (next && next.date !== day.date && day.lat != null && day.lng != null && next.lat != null && next.lng != null) {
+    if (next && day.lat != null && day.lng != null && next.lat != null && next.lng != null) {
       const km = legKm(day, next)
       const real = legFor(day, next)
       legNext = { km, real, title: legTitle(day, next) }
     }
-    out.push({ day, dayIndex: dayOfTrip.get(day.date), dateHead, cleanLabel, legNext })
+    out.push({ day, dayLabel, spanISO, cleanLabel, legNext })
+    cumulative += span
   }
   return out
 })
@@ -376,9 +388,9 @@ const totalDriveMin = computed(() => {
   return sum
 })
 
-function isToday(date) { return date === today.value }
-function isPast(date) { return date < today.value }
-function isFuture(date) { return date > today.value }
+function isTodayInRange(d) { return today.value >= d.date && today.value <= endOf(d) }
+function isPastStop(d) { return endOf(d) < today.value }
+function isFutureStop(d) { return d.date > today.value }
 
 function shortDay(iso) { return parseInt(iso.slice(8, 10), 10) }
 function shortMonth(iso) {

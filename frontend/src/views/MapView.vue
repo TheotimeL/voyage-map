@@ -360,15 +360,15 @@ const tripStats = computed(() => {
       driveMin += leg.minutes
     }
   }
-  // "days" is the calendar-day count, not row count — two stops on the same
-  // day should still read as one day in the trip-wide summary.
-  const uniqueDays = new Set(days.map((d) => d.date)).size
+  // Trip days = sum of every stop's span. Single-day stops contribute 1;
+  // multi-day stops contribute (end_date - date + 1).
+  const tripDays = days.reduce((acc, d) => acc + Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1, 0)
   return {
     points: ps.length - trails.length,
     trails: trails.length,
     trailKm: Math.round(trailKm * 10) / 10,
     trailDPlus: Math.round(trailDPlus),
-    days: uniqueDays,
+    days: tripDays,
     driveKm: Math.round(driveKm),
     driveMin: driveMin > 0 ? driveMin : null,
     driveMinFmt: driveMin > 0 ? fmtMinutes(driveMin) : null,
@@ -461,11 +461,14 @@ watch(theme, () => { if (leaflet) attachTiles() })
 // Keep the recents stats in sync as the user edits the map. Without this the
 // home page would still report whatever counts existed when the map last
 // loaded (a recurring "0 pins" bug).
+function tripDaysOf(itin) {
+  return (itin || []).reduce((acc, d) => acc + Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1, 0)
+}
 watch(
   () => mapData.value && [
     (mapData.value.points || []).length,
     (mapData.value.points || []).filter((p) => p.category === 'trail').length,
-    new Set((mapData.value.itinerary || []).map((d) => d.date)).size,
+    tripDaysOf(mapData.value.itinerary),
   ],
   (next) => {
     if (!next || !mapData.value) return
@@ -473,7 +476,7 @@ watch(
     updateRecentStats(props.slug, {
       points: (mapData.value.points || []).length - trails,
       trails,
-      days: new Set((mapData.value.itinerary || []).map((d) => d.date)).size,
+      days: tripDaysOf(mapData.value.itinerary),
     })
   },
 )
@@ -595,7 +598,7 @@ function adoptMap(m, { fromSnapshot = false } = {}) {
     {
       points: (m.points || []).filter((p) => p.category !== 'trail').length,
       trails: (m.points || []).filter((p) => p.category === 'trail').length,
-      days: new Set((m.itinerary || []).map((d) => d.date)).size,
+      days: (m.itinerary || []).reduce((acc, d) => acc + Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1, 0),
     },
     { lastCenter: { lat: m.center_lat, lng: m.center_lng } },
   )
@@ -698,75 +701,46 @@ function makeItineraryIcon(num, isToday = false) {
   })
 }
 
-// Group consecutive days that share the same coordinates so we render one
-// tooltip per stay (e.g. "Day 1–2 · Excalibur Hotel") instead of stacking
-// duplicates at the exact same point on the map.
-function isSamePoint(a, b) {
-  if (!a || !b) return false
-  return Math.abs(a.lat - b.lat) < 1e-4 && Math.abs(a.lng - b.lng) < 1e-4
-}
-function buildStayGroups(days) {
-  const groups = []
-  for (let i = 0; i < days.length; i++) {
-    const head = groups[groups.length - 1]
-    if (head && isSamePoint(head.day, days[i])) {
-      head.count += 1
-      head.endIdx = i
-    } else {
-      groups.push({ day: days[i], startIdx: i, endIdx: i, count: 1 })
-    }
-  }
-  return groups
-}
-
 function renderItinerary() {
   if (!leaflet) return
   for (const m of itineraryMarkers.values()) leaflet.removeLayer(m)
   itineraryMarkers.clear()
   clearLegLines()
 
-  const days = (mapData.value?.itinerary || [])
+  const stops = (mapData.value?.itinerary || [])
     .filter((d) => d.lat != null && d.lng != null)
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
 
   const today = todayISO()
-  const groups = buildStayGroups(days)
-  const groupHeads = new Set(groups.map((g) => g.startIdx))
-
-  days.forEach((d, i) => {
-    const isHead = groupHeads.has(i)
+  let cumulative = 0
+  stops.forEach((d) => {
+    const end = d.end_date || d.date
+    const span = Math.round((new Date(end) - new Date(d.date)) / 86400000) + 1
+    const startNum = cumulative + 1
+    const endNum = cumulative + span
+    const isToday = today >= d.date && today <= end
     const m = L.marker([d.lat, d.lng], {
-      icon: makeItineraryIcon(i + 1, d.date === today),
-      title: `${d.label || 'Day'} — drag to refine, click to focus`,
-      // Head sits on top so its tooltip + click handler win over stacked
-      // continuation pins at the same coordinate.
-      zIndexOffset: isHead ? 600 : 500,
+      icon: makeItineraryIcon(span > 1 ? `${startNum}–${endNum}` : startNum, isToday),
+      title: `${d.label || 'Stop'} — drag to refine, click to focus`,
+      zIndexOffset: 600,
       draggable: true,
     }).addTo(leaflet)
-    if (isHead) {
-      const group = groups.find((g) => g.startIdx === i)
-      const span = group.count > 1
-        ? `Day ${i + 1}–${i + group.count}`
-        : `Day ${i + 1}`
-      // Strip a leading "Day N — " / "Day N - " from the saved label so we
-      // don't end up with "Day 1 · Day 1 — Vegas" when the label already
-      // names the day itself.
-      const cleanLabel = d.label
-        ? d.label.replace(/^\s*Day\s*\d+\s*[—\-–:·]\s*/i, '').trim()
-        : ''
-      // Two-part tip so CSS can hide the label half at lower zooms — keeps
-      // the trip readable when zoomed out while preserving detail when in.
-      const tipHtml = cleanLabel
-        ? `<span class="iti-tip-num">${span}</span><span class="iti-tip-label">${cleanLabel}</span>`
-        : `<span class="iti-tip-num">${span}</span>`
-      m.bindTooltip(tipHtml, {
-        permanent: true,
-        direction: 'right',
-        offset: [10, 0],
-        className: 'iti-tip',
-      })
-    }
+    const dayChip = span > 1 ? `Day ${startNum}–${endNum}` : `Day ${startNum}`
+    const cleanLabel = d.label
+      ? d.label.replace(/^\s*Day\s*\d+(?:\s*[—\-–]\s*\d+)?\s*[—\-–:·]\s*/i, '').trim()
+      : ''
+    // Two-part tip so CSS can hide the label half at lower zooms — keeps
+    // the trip readable when zoomed out while preserving detail when in.
+    const tipHtml = cleanLabel
+      ? `<span class="iti-tip-num">${dayChip}</span><span class="iti-tip-label">${cleanLabel}</span>`
+      : `<span class="iti-tip-num">${dayChip}</span>`
+    m.bindTooltip(tipHtml, {
+      permanent: true,
+      direction: 'right',
+      offset: [10, 0],
+      className: 'iti-tip',
+    })
     m.on('click', () => onGoDay(d))
     m.on('dragend', async (e) => {
       const ll = e.target.getLatLng()
@@ -777,16 +751,16 @@ function renderItinerary() {
           mapData.value.itinerary[idx] = { ...mapData.value.itinerary[idx], ...updated }
         }
       } catch (err) {
-        // Snap back on failure.
         m.setLatLng([d.lat, d.lng])
-        error.value = err?.message || 'Could not move that day.'
+        error.value = err?.message || 'Could not move that stop.'
       }
     })
     itineraryMarkers.set(d.id, m)
+    cumulative += span
   })
 
-  attachLegLines(days)
-  attachLegLabels(days)
+  attachLegLines(stops)
+  attachLegLabels(stops)
   applyZoomDensity()
   hideOverlappingLabels()
 }
@@ -1149,14 +1123,22 @@ const todayBanner = computed(() => {
   if (!days.length) return null
   const t = today.value
   const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date))
-  const todayDay = sorted.find((d) => d.date === t)
-  if (todayDay) {
-    const idx = sorted.indexOf(todayDay)
+  // Within a multi-day stop, today is "between" date and end_date (inclusive).
+  const todayStop = sorted.find((d) => t >= d.date && t <= (d.end_date || d.date))
+  if (todayStop) {
+    let cumulative = 0
+    let totalNights = 0
+    for (const d of sorted) {
+      const span = Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1
+      if (d === todayStop) cumulative += Math.round((new Date(t) - new Date(d.date)) / 86400000) + 1
+      else if (sorted.indexOf(d) < sorted.indexOf(todayStop)) cumulative += span
+      totalNights += span
+    }
     return attachSun({
-      tag: `Day ${idx + 1} / ${sorted.length}`,
-      text: bannerNameFor(todayDay).toUpperCase(),
-      notes: todayDay.notes || null,
-      day: todayDay,
+      tag: `Day ${cumulative} / ${totalNights}`,
+      text: bannerNameFor(todayStop).toUpperCase(),
+      notes: todayStop.notes || null,
+      day: todayStop,
     })
   }
   const future = sorted.find((d) => d.date > t)

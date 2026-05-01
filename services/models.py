@@ -59,11 +59,17 @@ class Point(Base):
 
 
 class ItineraryDay(Base):
+    """A *stop* in the trip. Spans `date`..`end_date` (inclusive); a single-day
+    stop has `end_date == date`. The table name and class name are kept for
+    backward compatibility with prior data — conceptually each row is a stop,
+    not a day."""
+
     __tablename__ = "itinerary_days"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     map_id: Mapped[int] = mapped_column(ForeignKey("maps.id", ondelete="CASCADE"), index=True)
     date: Mapped[date_type] = mapped_column(Date, index=True)
+    end_date: Mapped[date_type] = mapped_column(Date, index=True)
     label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)

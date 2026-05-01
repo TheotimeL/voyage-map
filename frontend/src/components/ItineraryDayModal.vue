@@ -1,13 +1,22 @@
 <template>
   <div class="scrim" @click.self="$emit('close')">
     <form class="paper modal" @submit.prevent="submit">
-      <p class="eyebrow">Edit day</p>
+      <p class="eyebrow">Edit stop</p>
 
-      <label class="lbl">Date</label>
-      <input ref="dateInput" v-model="form.date" type="date" class="field" required />
+      <div class="date-row">
+        <div class="date-cell">
+          <label class="lbl">From</label>
+          <input ref="dateInput" v-model="form.date" type="date" class="field" required />
+        </div>
+        <div class="date-cell">
+          <label class="lbl">Until</label>
+          <input v-model="form.end_date" type="date" class="field" :min="form.date" required />
+        </div>
+      </div>
+      <p v-if="spanDays > 1" class="hint mono">{{ spanDays }} nights at this stop</p>
 
       <label class="lbl">Name</label>
-      <input v-model="form.label" class="field" maxlength="200" placeholder="e.g. Hôtel Paradiso, Day 3, Camp Joshua…" />
+      <input v-model="form.label" class="field" maxlength="200" placeholder="e.g. Hôtel Paradiso, Camp Joshua, BLM…" />
 
       <label class="lbl">Location</label>
       <GeocoderSearch
@@ -44,7 +53,7 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed } from 'vue'
+import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch } from 'vue'
 import { formatLat, formatLng, openInMaps } from '@/util.js'
 import GeocoderSearch from './GeocoderSearch.vue'
 
@@ -57,12 +66,22 @@ const emit = defineEmits(['save', 'close'])
 
 const form = reactive({
   date: props.modelValue.date,
+  end_date: props.modelValue.end_date || props.modelValue.date,
   label: props.modelValue.label || '',
   notes: props.modelValue.notes || '',
   lat: props.modelValue.lat ?? null,
   lng: props.modelValue.lng ?? null,
 })
 const hasCoord = computed(() => form.lat != null && form.lng != null)
+const spanDays = computed(() => {
+  if (!form.date || !form.end_date) return 1
+  return Math.max(1, Math.round((new Date(form.end_date) - new Date(form.date)) / 86400000) + 1)
+})
+// If the user shifts `From` past `Until`, snap `Until` along so the
+// constraint never inverts mid-edit.
+watch(() => form.date, (next) => {
+  if (form.end_date && next > form.end_date) form.end_date = next
+})
 
 const dateInput = useTemplateRef('dateInput')
 onMounted(() => dateInput.value?.focus())
@@ -94,6 +113,7 @@ function onDirections() {
 function submit() {
   emit('save', {
     date: form.date,
+    end_date: form.end_date || form.date,
     label: form.label.trim() || null,
     notes: form.notes.trim() || null,
     lat: form.lat,
@@ -111,6 +131,8 @@ function submit() {
   gap: 0.7rem;
   padding: 1.4rem 1.5rem;
 }
+.date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+.date-cell { display: grid; gap: 0.3rem; }
 .lbl {
   font-family: var(--mono);
   font-size: 0.72rem;

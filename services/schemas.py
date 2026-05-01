@@ -64,6 +64,7 @@ class MapPatch(BaseModel):
 
 class ItineraryDayIn(BaseModel):
     date: date_type
+    end_date: date_type | None = None  # defaults to `date` (single-day stop)
     label: str | None = Field(default=None, max_length=200)
     lat: float | None = None
     lng: float | None = None
@@ -72,6 +73,7 @@ class ItineraryDayIn(BaseModel):
 
 class ItineraryDayPatch(BaseModel):
     date: date_type | None = None
+    end_date: date_type | None = None
     label: str | None = Field(default=None, max_length=200)
     lat: float | None = None
     lng: float | None = None
@@ -83,6 +85,7 @@ class ItineraryDayOut(BaseModel):
 
     id: int
     date: date_type
+    end_date: date_type
     label: str | None
     lat: float | None
     lng: float | None
