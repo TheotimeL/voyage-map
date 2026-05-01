@@ -13,7 +13,7 @@
     <section class="more-block">
       <div class="more-row">
         <h4 class="more-title">Offline tiles</h4>
-        <PrecacheButton :theme="theme" />
+        <PrecacheButton :theme="theme" :next-leg-bbox="nextLegBbox" />
       </div>
     </section>
   </div>
@@ -30,6 +30,9 @@ defineProps({
   getBounds: { type: Function, required: true },
   theme: { type: String, required: true },
   placeName: { type: String, default: '' },
+  // Bbox for the next leg (today→next stop). Null when there's no upcoming
+  // leg; PrecacheButton disables the "Next leg" segment in that case.
+  nextLegBbox: { type: Object, default: null },
 })
 const emit = defineEmits(['render-survival', 'clear-survival'])
 </script>

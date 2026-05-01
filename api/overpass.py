@@ -69,9 +69,10 @@ async def overpass_query(
 
 async def _trails_query(south: float, west: float, north: float, east: float):
     bbox = f"{south},{west},{north},{east}"
-    # Hiking and foot routes (relations) plus named hiking ways. We ask
-    # Overpass for both the relation tags and the geometry centre via
-    # `out center`, so each result has a single representative coordinate.
+    # Hiking and foot routes (relations) plus named hiking ways. We pull
+    # geometry (`out geom`) so the frontend can draw the actual polyline
+    # instead of just dropping a pin at the centroid — important for trail
+    # runners eyeballing route shape before committing.
     ql = f"""
     [out:json][timeout:30];
     (
@@ -79,7 +80,7 @@ async def _trails_query(south: float, west: float, north: float, east: float):
       way["highway"="path"]["sac_scale"]({bbox});
       way["highway"="path"]["name"]({bbox});
     );
-    out tags center;
+    out tags geom;
     """
     async with httpx.AsyncClient(timeout=35) as c:
         r = await c.post(

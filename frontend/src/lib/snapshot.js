@@ -33,7 +33,10 @@ function openDB() {
     req.onsuccess = () => resolve(req.result)
     // Private browsing / disabled storage / quota — fail soft so the rest of
     // the app still works against the network.
-    req.onerror = () => resolve(null)
+    req.onerror = () => {
+      console.warn('voyage-snapshot: indexedDB.open failed', req.error)
+      resolve(null)
+    }
   })
   return _dbPromise
 }
@@ -46,8 +49,14 @@ async function withStore(mode, fn) {
     const store = tx.objectStore(STORE)
     const result = fn(store)
     tx.oncomplete = () => resolve(result?.value ?? result ?? null)
-    tx.onerror = () => resolve(null)
-    tx.onabort = () => resolve(null)
+    tx.onerror = () => {
+      console.warn('voyage-snapshot: tx error', tx.error)
+      resolve(null)
+    }
+    tx.onabort = () => {
+      console.warn('voyage-snapshot: tx aborted', tx.error)
+      resolve(null)
+    }
   })
 }
 
@@ -64,7 +73,10 @@ export async function readSnapshot(slug) {
       const row = req.result
       resolve(row?.payload || null)
     }
-    req.onerror = () => resolve(null)
+    req.onerror = () => {
+      console.warn('voyage-snapshot: read failed', req.error)
+      resolve(null)
+    }
   })
 }
 
@@ -77,7 +89,10 @@ export async function writeSnapshot(slug, payload) {
   if (!slug || !payload) return
   let plain
   try { plain = JSON.parse(JSON.stringify(payload)) }
-  catch { return }
+  catch (e) {
+    console.warn('voyage-snapshot: payload not serialisable', e)
+    return
+  }
   await withStore('readwrite', (store) => {
     store.put({ slug, payload: plain, savedAt: Date.now() })
   })

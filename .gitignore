@@ -5,6 +5,7 @@ venv/
 .env
 *.db
 *.db-journal
+*.db.pre-redesign-backup
 *.sqlite
 *.sqlite3
 

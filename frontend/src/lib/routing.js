@@ -98,16 +98,20 @@ export async function routeLeg(a, b) {
     }
   } catch { /* keep fallback */ }
 
-  cache.set(k, result)
-  if (result.source === 'osrm') saveToLocalStorage()
+  // Estimates are cheap to recompute and shouldn't lock us out of trying the
+  // real OSRM call once the network comes back. Cache only confirmed routes.
+  if (result.source === 'osrm') {
+    cache.set(k, result)
+    saveToLocalStorage()
+  }
   return result
 }
 
-// Format minutes as "4h 30" / "45min".
+// Format minutes as "4h 30m" / "45 min".
 export function fmtMinutes(min) {
   if (!Number.isFinite(min)) return ''
   if (min < 60) return `${min} min`
   const h = Math.floor(min / 60)
   const m = min % 60
-  return m === 0 ? `${h}h` : `${h}h ${String(m).padStart(2, '0')}`
+  return m === 0 ? `${h}h` : `${h}h ${String(m).padStart(2, '0')}m`
 }

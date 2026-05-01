@@ -8,18 +8,26 @@
     >
       <template #header>
         <div class="dock-head-row">
-          <RouterLink :to="{ path: '/', query: { home: 1 } }" class="dock-back mono" title="Back to all voyages">← Voyages</RouterLink>
           <span
             v-if="offlineSnapshot"
             class="offline-badge mono"
             title="No network — showing the last copy saved on this device. Edits will fail until you're back online."
           >⤬ offline · cached</span>
+          <span v-else class="dock-eyebrow mono">Field guide</span>
           <div class="dock-head-actions">
             <button v-if="hasContent" class="head-icon mono" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
-            <button class="head-icon mono" type="button" :title="copied ? 'Link copied' : 'Copy share link'" @click="copyUrl">{{ copied ? '✓' : '⧉' }}</button>
+            <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
             <ThemeToggle class="head-icon" />
+            <button class="head-icon mono" type="button" title="Trip overview & settings" @click="showOverview = !showOverview">⋯</button>
           </div>
         </div>
+        <Transition name="reveal">
+          <div v-if="showOverview" class="dock-overview">
+            <p class="overview-eyebrow mono">This trip</p>
+            <p class="overview-line mono">{{ overviewLine }}</p>
+            <RouterLink :to="{ path: '/', query: { home: 1 } }" class="overview-link mono">＋ Start a new voyage</RouterLink>
+          </div>
+        </Transition>
         <h2 class="title">
           <input
             v-model="titleDraft"
@@ -83,6 +91,7 @@
           @add="onAddDay"
           @add-bulk="onAddDaysBulk"
           @add-trail-pin="onAddTrailPin"
+          @trail-preview="onTrailPreview"
           @delete="onDeleteDay"
           @go="onGoDay"
           @edit="(d) => editingDay = d"
@@ -98,6 +107,7 @@
           :get-bounds="getMapBounds"
           :theme="theme"
           :place-name="todayBanner?.day?.label || ''"
+          :next-leg-bbox="nextLegBbox"
           @render-survival="renderSurvival"
           @clear-survival="clearSurvival"
         />
@@ -110,16 +120,35 @@
       @dragleave="onGpxDragLeave"
       @drop.prevent="onGpxDrop"
     >
-      <div v-if="todayBanner && !bannerDismissed" class="today-banner">
+      <TripRibbon
+        v-if="(mapData?.itinerary || []).length"
+        class="trip-ribbon"
+        :days="mapData.itinerary"
+        @go="onGoDay"
+      />
+      <div v-if="todayBanner && !bannerDismissed" class="today-banner" :class="{ 'is-live': todayBanner.live, 'is-future': !todayBanner.live }">
         <button class="banner-main" type="button" :title="`Center on ${todayBanner.day.label || 'this day'}`" @click="onGoDay(todayBanner.day)">
           <span class="banner-tag mono">{{ todayBanner.tag }}</span>
           <span class="banner-text">{{ todayBanner.text }}</span>
           <span v-if="bannerWx" class="banner-wx mono">
             {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
           </span>
-          <span v-if="todayBanner.sun" class="banner-sun mono">☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}</span>
+          <span v-if="todayBanner.sun" class="banner-sun mono">
+            ☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}
+            <template v-if="todayBanner.live && sunsetCountdown"> · sunset {{ sunsetCountdown }}</template>
+          </span>
+          <span v-if="todayBanner.live && nextLegInfo" class="banner-next mono">
+            ↳ next: {{ nextLegInfo }}
+          </span>
           <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
         </button>
+        <button
+          v-if="todayBanner.live && nextStop"
+          class="banner-advance mono"
+          type="button"
+          :title="`Mark ${todayBanner.day.label || 'this stop'} done — jump to ${nextStop.label || 'the next stop'}`"
+          @click="advanceToNextStop"
+        >Made it →</button>
         <button class="banner-action" type="button" title="Edit this day" @click="editingDay = todayBanner.day">✎</button>
         <button class="banner-close" type="button" title="Hide for this session" @click="dismissBanner">×</button>
       </div>
@@ -141,6 +170,8 @@
         :armed="dropMode"
         @drop="onFabDrop"
         @search="onFabSearch"
+        @add-stop="onFabAddStop"
+        @find-trails="onFabFindTrails"
       />
       <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
 
@@ -189,6 +220,19 @@
       @close="editingDay = null"
     />
 
+    <!-- FAB-initiated trail finder (vs the per-day finder mounted inside
+         Itinerary.vue). Anchored at the map centre and routes through the
+         same add-trail-pin handler so the persistence path is identical. -->
+    <TrailFinderModal
+      v-if="fabTrailFor"
+      :lat="fabTrailFor.lat"
+      :lng="fabTrailFor.lng"
+      :name="fabTrailFor.label"
+      @close="fabTrailFor = null; onTrailPreview(null)"
+      @pick="(t) => { fabTrailFor = null; onAddTrailPin(t); }"
+      @preview="onTrailPreview"
+    />
+
     <Teleport to="body">
       <div v-if="candidatesFor" class="scrim" @click.self="candidatesFor = null">
         <div class="paper candidate-modal">
@@ -217,7 +261,7 @@ import L from 'leaflet'
 import SunCalc from 'suncalc'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
-import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX } from '@/util.js'
 import { geocode, categoryFromOSM, reverseGeocode } from '@/api.js'
 import Itinerary from '@/components/Itinerary.vue'
 import PointList from '@/components/PointList.vue'
@@ -231,6 +275,8 @@ import InfoPanel from '@/components/InfoPanel.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import MapFab from '@/components/MapFab.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import TrailFinderModal from '@/components/TrailFinderModal.vue'
+import TripRibbon from '@/components/TripRibbon.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap, updateRecentStats } from '@/lib/recents.js'
@@ -247,9 +293,13 @@ const loading = ref(true)
 const error = ref('')
 const titleDraft = ref('')
 const activeTab = ref('itinerary')
+// No emoji — the cream/ink palette plus typographic eyebrows do the visual
+// work; color emoji clash with the paper aesthetic. Glyphs below are
+// monoglyph unicode marks (chevron / pin-shape / dots) that pick up the
+// surrounding text color.
 const tabs = [
-  { key: 'itinerary', label: 'Trip', icon: '🗓' },
-  { key: 'places', label: 'Pins', icon: '📍' },
+  { key: 'itinerary', label: 'Trip', icon: '◷' },
+  { key: 'places', label: 'Pins', icon: '⌖' },
   { key: 'more', label: 'Tools', icon: '⋯' },
 ]
 // Default to the Trip tab — users open the app to plan, not to browse pins.
@@ -667,11 +717,13 @@ function initLeaflet() {
 
   leaflet.on('moveend', () => {
     mapBboxBumper.value++
+    spreadOverlappingPins()
     hideOverlappingLabels()
   })
   leaflet.on('zoomend', () => {
     mapBboxBumper.value++
     applyZoomDensity()
+    spreadOverlappingPins()
     hideOverlappingLabels()
   })
   applyZoomDensity()
@@ -762,6 +814,7 @@ function renderItinerary() {
   attachLegLines(stops)
   attachLegLabels(stops)
   applyZoomDensity()
+  spreadOverlappingPins()
   hideOverlappingLabels()
 }
 
@@ -795,6 +848,50 @@ function hideOverlappingLabels() {
       el.classList.add('is-collided')
     } else {
       placed.push(rect)
+    }
+  }
+}
+
+// Pin-overlap: when two day pins land within PIN_SPREAD_PX of each other in
+// screen space (e.g. Mather + BLM ~6 km apart at zoom 7), nudge the later
+// pin outward in a small circle so both stay clickable. Resets to true coords
+// on zoom-in where they no longer overlap. Re-runs on every move/zoom.
+const PIN_SPREAD_PX = 28
+function spreadOverlappingPins() {
+  if (!leaflet) return
+  const days = (mapData.value?.itinerary || [])
+    .filter((d) => d.lat != null && d.lng != null)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+  // Group days by approximate map-pixel cluster so we know how many to spread.
+  const placed = []  // { d, x, y }
+  for (const d of days) {
+    const m = itineraryMarkers.get(d.id)
+    if (!m) continue
+    // Reset to the day's true position before measuring — yesterday's offset
+    // would otherwise compound.
+    m.setLatLng([d.lat, d.lng])
+    const pt = leaflet.latLngToContainerPoint([d.lat, d.lng])
+    placed.push({ d, m, x: pt.x, y: pt.y, true_: pt })
+  }
+  // For each pair within PIN_SPREAD_PX, push the later pin outward along the
+  // vector from the earlier pin (or due-east when at the same point).
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i], b = placed[j]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const dist = Math.hypot(dx, dy)
+      if (dist >= PIN_SPREAD_PX) continue
+      // Spread on a circle: each subsequent collider gets an angle stepped
+      // by 60°, large enough that 2-4 stacked pins all stay clickable.
+      const angle = ((j - i) * 60) * Math.PI / 180
+      const r = PIN_SPREAD_PX
+      const nx = a.x + Math.cos(angle) * r
+      const ny = a.y + Math.sin(angle) * r
+      b.x = nx
+      b.y = ny
+      const ll = leaflet.containerPointToLatLng([nx, ny])
+      b.m.setLatLng(ll)
     }
   }
 }
@@ -850,11 +947,15 @@ function attachLegLabels(days) {
     if (leg.km < 1) continue
     const midLat = (a.lat + b.lat) / 2
     const midLng = (a.lng + b.lng) / 2
-    const text = `${fmtMinutes(leg.minutes)} · ${leg.km} km`
+    const isShort = leg.km < 5
+    const text = isShort ? `${leg.km} km` : `${fmtMinutes(leg.minutes)} · ${leg.km} km`
+    const cls = ['leg-label']
+    if (leg.source === 'estimate') cls.push('is-est')
+    if (isShort) cls.push('is-short')
     const m = L.marker([midLat, midLng], {
       icon: L.divIcon({
         className: 'leg-label-wrap',
-        html: `<div class="leg-label${leg.source === 'estimate' ? ' is-est' : ''}">${text}</div>`,
+        html: `<div class="${cls.join(' ')}">${text}</div>`,
         iconSize: null,
       }),
       interactive: false,
@@ -979,6 +1080,29 @@ async function onFabSearch() {
   activeTab.value = 'places'
   await nextTick()
   document.querySelector('.tab-content input[type="text"], .tab-content input.field')?.focus()
+}
+
+// FAB → "Add a stop": jump to Trip tab and open the inline add-stop disclosure
+// at the suggested next-day date. Faster than the prior 3-tap path.
+async function onFabAddStop() {
+  activeTab.value = 'itinerary'
+  await nextTick()
+  // Itinerary auto-opens add when days===0; otherwise we toggle it manually.
+  const btn = document.querySelector('.tab-content .btn-add-day')
+  // Open if currently closed.
+  if (btn && !btn.classList.contains('open')) btn.click()
+  await nextTick()
+  document.querySelector('.tab-content .add-date')?.focus()
+}
+
+// FAB → "Trails near here": find trails around the current map centre. Uses
+// the visible map center because it's the strongest "I'm looking at this
+// area" signal — better than guessing a stop.
+const fabTrailFor = ref(null)
+function onFabFindTrails() {
+  if (!leaflet) return
+  const c = leaflet.getCenter()
+  fabTrailFor.value = { lat: c.lat, lng: c.lng, label: 'this area' }
 }
 
 function onSelectPoint(p) {
@@ -1139,6 +1263,7 @@ const todayBanner = computed(() => {
       text: bannerNameFor(todayStop).toUpperCase(),
       notes: todayStop.notes || null,
       day: todayStop,
+      live: true,
     })
   }
   const future = sorted.find((d) => d.date > t)
@@ -1151,10 +1276,89 @@ const todayBanner = computed(() => {
       text: `Next: ${bannerNameFor(future).toUpperCase()}`,
       notes: future.notes || null,
       day: future,
+      live: false,
     })
   }
   return null
 })
+
+// Live-mode helpers — only meaningful when `todayBanner.live`. These keep the
+// banner useful as a trip companion: how long until sunset (a real safety
+// concern during desert hikes), what's the next stop, and how far is it.
+const nextStop = computed(() => {
+  if (!todayBanner.value?.live) return null
+  const sorted = [...(mapData.value?.itinerary || [])].sort((a, b) => a.date.localeCompare(b.date))
+  const i = sorted.indexOf(todayBanner.value.day)
+  return i >= 0 && i < sorted.length - 1 ? sorted[i + 1] : null
+})
+const nextLegInfo = computed(() => {
+  if (!todayBanner.value?.live || !nextStop.value) return null
+  const here = todayBanner.value.day
+  const there = nextStop.value
+  if (here.lat == null || there.lat == null) return null
+  const k = legPairKey(here, there)
+  const leg = drivingLegs.value[k]
+  const name = there.label || dayPlaceNames.value[there.id] || 'next stop'
+  if (leg) return `${name} · ${leg.km} km · ${fmtMinutes(leg.minutes)}`
+  return name
+})
+
+// Tick every minute so the sunset countdown stays fresh without burning CPU.
+const wallClock = ref(Date.now())
+let _tick = null
+onMounted(() => { _tick = setInterval(() => { wallClock.value = Date.now() }, 60_000) })
+onBeforeUnmount(() => { if (_tick) clearInterval(_tick) })
+
+const sunsetCountdown = computed(() => {
+  if (!todayBanner.value?.live) return null
+  const day = todayBanner.value.day
+  if (day.lat == null || day.lng == null) return null
+  // Touch the wall clock so we re-render every minute.
+  const now = wallClock.value
+  const t = SunCalc.getTimes(new Date(now), day.lat, day.lng)
+  if (!t.sunset || isNaN(t.sunset)) return null
+  const ms = t.sunset.getTime() - now
+  if (ms < -30 * 60_000) return null   // already long past sunset
+  const sign = ms < 0 ? 'past' : 'in'
+  const min = Math.round(Math.abs(ms) / 60_000)
+  if (min < 60) return `${sign} ${min}m`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return `${sign} ${h}h${m ? ' ' + m + 'm' : ''}`
+})
+
+// Bbox for the next leg — today/next stop pair, padded ~10% on each side so
+// the cached tiles include road context, not just the endpoints. Used by the
+// per-leg pre-cache option in MoreMenu.
+const nextLegBbox = computed(() => {
+  const here = todayBanner.value?.day
+  const there = nextStop.value
+  if (!here?.lat || !there?.lat) return null
+  const minLat = Math.min(here.lat, there.lat)
+  const maxLat = Math.max(here.lat, there.lat)
+  const minLng = Math.min(here.lng, there.lng)
+  const maxLng = Math.max(here.lng, there.lng)
+  const padLat = Math.max(0.05, (maxLat - minLat) * 0.1)
+  const padLng = Math.max(0.05, (maxLng - minLng) * 0.1)
+  return {
+    minLat: minLat - padLat,
+    maxLat: maxLat + padLat,
+    minLng: minLng - padLng,
+    maxLng: maxLng + padLng,
+  }
+})
+
+// "Made it →" — when arriving at the next stop ahead of schedule. Centers
+// the map there and dismisses the now-stale today banner; the next page
+// reload will surface the new stop as today (or "next" if the user lingers).
+function advanceToNextStop() {
+  const ns = nextStop.value
+  if (!ns) return
+  if (leaflet && ns.lat != null && ns.lng != null) {
+    leaflet.flyTo([ns.lat, ns.lng], Math.max(leaflet.getZoom(), 11), { duration: 0.6 })
+  }
+  dismissBanner()
+}
 
 watch(() => todayBanner.value?.day, (d) => { ensurePlaceName(d) }, { immediate: true })
 
@@ -1191,28 +1395,61 @@ async function onAddDay(payload) {
 }
 
 async function onAddTrailPin(t) {
-  // Trails returned by Overpass have no GPX, so we create a regular Trail-
-  // category pin and let the user attach a GPX later. Title follows the OSM
-  // route name; comment captures any sac_scale/distance context.
+  // Overpass trails arrive with optional polyline geometry. Synthesise a
+  // minimal GPX so the existing renderTrack pipeline draws the actual route
+  // (not just a centroid pin) and the elevation overlay slot is populated.
+  // No SAC jargon in the comment — `sacPlain` already translates it.
   try {
     const bits = []
-    if (t.kind) bits.push(t.kind)
-    if (t.sac) bits.push(`SAC ${t.sac}`)
-    if (t.distance) bits.push(`${t.distance} km`)
+    if (t.sacPlain) bits.push(t.sacPlain)
+    else if (t.kind) bits.push(t.kind)
+    if (t.lengthKm) bits.push(`${t.lengthKm} km`)
     if (t.ref) bits.push(t.ref)
-    const created = await api.addPoint(props.slug, {
+    const idx = trailPoints.value.length
+    const payload = {
       lat: t.lat,
       lng: t.lng,
       title: t.name,
       category: 'trail',
       comment: bits.length ? bits.join(' · ') : null,
-    })
+      color: trackColor(idx),
+    }
+    if (t.coords && t.coords.length > 1) {
+      payload.gpx_data = coordsToGPX(t.coords, t.name)
+    }
+    const created = await api.addPoint(props.slug, payload)
     mapData.value.points.push(created)
-    addPointMarker(created)
+    if (created.gpx_data) {
+      const line = renderTrack(created, idx)
+      if (line && leaflet) leaflet.fitBounds(line.getBounds(), { padding: [40, 40], maxZoom: 14 })
+    } else {
+      addPointMarker(created)
+      if (leaflet) leaflet.flyTo([t.lat, t.lng], 13, { duration: 0.5 })
+    }
     activeId.value = created.id
     detail.value = { ...created }
-    if (leaflet) leaflet.flyTo([t.lat, t.lng], 13, { duration: 0.5 })
   } catch (e) { error.value = e.message }
+}
+
+// Hover/focus preview from the trail finder: draws a temporary polyline so
+// the user sees the route shape before clicking. Cleared on unhover or modal
+// close.
+let trailPreviewLine = null
+function onTrailPreview(t) {
+  if (!leaflet) return
+  if (trailPreviewLine) {
+    leaflet.removeLayer(trailPreviewLine)
+    trailPreviewLine = null
+  }
+  if (!t || !t.coords || t.coords.length < 2) return
+  trailPreviewLine = L.polyline(t.coords, {
+    color: '#e85d3c',
+    weight: 4,
+    opacity: 0.9,
+    dashArray: '6 6',
+    lineCap: 'round',
+    interactive: false,
+  }).addTo(leaflet)
 }
 
 async function onAddDaysBulk(payload) {
@@ -1420,11 +1657,32 @@ async function commitTitle() {
   }
 }
 
-function copyUrl() {
-  navigator.clipboard.writeText(window.location.href)
+// Share URL: `/v/{slug}` is the read-only mirror; copying that instead of
+// `/m/{slug}` means the recipient can't accidentally edit the host's trip.
+function copyShareUrl() {
+  const url = `${window.location.origin}/v/${props.slug}`
+  navigator.clipboard.writeText(url)
   copied.value = true
   setTimeout(() => (copied.value = false), 1800)
 }
+
+const showOverview = ref(false)
+const overviewLine = computed(() => {
+  if (!mapData.value) return ''
+  const stops = (mapData.value.itinerary || []).length
+  const days = (mapData.value.itinerary || []).reduce(
+    (acc, d) => acc + Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1,
+    0,
+  )
+  const points = (mapData.value.points || []).filter((p) => p.category !== 'trail').length
+  const trails = (mapData.value.points || []).filter((p) => p.category === 'trail').length
+  const bits = []
+  if (days) bits.push(`${days} day${days === 1 ? '' : 's'}`)
+  if (stops) bits.push(`${stops} stop${stops === 1 ? '' : 's'}`)
+  if (trails) bits.push(`${trails} trail${trails === 1 ? '' : 's'}`)
+  if (points) bits.push(`${points} pin${points === 1 ? '' : 's'}`)
+  return bits.join(' · ') || 'Empty trip'
+})
 
 const hasContent = computed(() => {
   if (!mapData.value) return false
@@ -1488,11 +1746,27 @@ onBeforeUnmount(() => {
   flex: 1;
   position: relative;
   height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .map {
+  flex: 1;
   width: 100%;
-  height: 100%;
   background: var(--cream-deep);
+}
+
+/* Trip ribbon: stripe above the map. The desktop dock floats over .map-wrap
+   (it's position:absolute), so we push the first chip clear with a padding
+   roughly matching the dock + its 16px margin. Hidden on phones — mobile
+   users have the full Trip tab in the sheet. */
+.trip-ribbon {
+  position: relative;
+  z-index: 650;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  padding-left: 392px;
+}
+@media (max-width: 720px) {
+  .trip-ribbon { display: none; }
 }
 .error { color: var(--vermillion-deep); }
 
@@ -1533,15 +1807,44 @@ onBeforeUnmount(() => {
 }
 .head-icon:hover { color: var(--vermillion); border-color: var(--vermillion); }
 
-.dock-back {
+.dock-eyebrow {
   display: inline-block;
   font-size: 0.7rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-faded);
+}
+
+.dock-overview {
+  margin: 0.25rem 0 0.45rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--cream);
+  border: 1px dashed var(--cream-edge);
+  border-radius: 3px;
+  display: grid;
+  gap: 0.25rem;
+}
+.overview-eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.overview-line {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+.overview-link {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vermillion);
   text-decoration: none;
 }
-.dock-back:hover { color: var(--vermillion); }
+.overview-link:hover { color: var(--vermillion-deep); }
 
 .offline-badge {
   font-size: 0.6rem;
@@ -1701,10 +2004,12 @@ onBeforeUnmount(() => {
 }
 .link-pick:hover { color: var(--vermillion-deep); }
 
-/* Today banner */
+/* Today banner — sits below the trip ribbon (when present) so the two
+   chrome elements don't overlap. The 4.2rem top accounts for the ribbon's
+   ~3.4rem height + a small gap. */
 .today-banner {
   position: absolute;
-  top: 1rem;
+  top: 4.2rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 700;
@@ -1714,7 +2019,7 @@ onBeforeUnmount(() => {
   color: var(--paper);
   border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-  max-width: 80%;
+  max-width: calc(100% - 2rem);
   overflow: hidden;
 }
 .banner-main {
@@ -1731,20 +2036,52 @@ onBeforeUnmount(() => {
   font: inherit;
   text-align: left;
 }
+@media (max-width: 560px) {
+  /* Two-row layout on phones: tag stays inline with the title; the meta line
+     (weather + sun) wraps below so temps stop getting clipped. */
+  .today-banner { max-width: calc(100% - 1rem); }
+  .banner-main {
+    flex-wrap: wrap;
+    white-space: normal;
+    gap: 0.4rem 0.7rem;
+    padding: 0.45rem 0.55rem 0.5rem 0.5rem;
+  }
+  .banner-text { font-size: 0.92rem; flex-basis: 100%; }
+  .banner-tag { align-self: flex-start; }
+  .banner-wx, .banner-sun { font-size: 0.74rem; }
+}
 .banner-main:hover { background: rgba(255,255,255,0.06); }
 .banner-action,
-.banner-close {
+.banner-close,
+.banner-advance {
   background: transparent;
   border: none;
   border-left: 1px solid rgba(255,255,255,0.1);
   color: var(--cream);
-  width: 2.2rem;
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
 }
+.banner-action,
+.banner-close { width: 2.2rem; }
+.banner-advance {
+  padding: 0 0.75rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: var(--vermillion);
+  color: var(--paper);
+}
+.banner-advance:hover { background: var(--vermillion-deep); }
 .banner-action:hover { background: var(--vermillion-deep); color: var(--paper); }
 .banner-close:hover { background: rgba(255,255,255,0.12); color: var(--paper); }
+.banner-next {
+  font-size: 0.74rem;
+  color: var(--cream);
+  opacity: 0.85;
+}
+.today-banner.is-live { background: var(--vermillion-deep); }
+.today-banner.is-live .banner-tag { background: var(--paper); color: var(--vermillion-deep); }
 .banner-tag {
   display: inline-block;
   background: var(--vermillion);
@@ -1831,6 +2168,11 @@ onBeforeUnmount(() => {
 .leg-label.is-est {
   border-style: dashed;
   opacity: 0.7;
+}
+.leg-label.is-short {
+  font-size: 0.6rem;
+  opacity: 0.6;
+  border-style: dotted;
 }
 
 /* Day-pin label collision: when two permanent tooltips overlap, the later

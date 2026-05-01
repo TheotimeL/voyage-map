@@ -35,6 +35,10 @@
 
     <ol v-if="rows.length" class="iti-list">
       <template v-for="r in rows" :key="r.day.id">
+        <li v-if="r.weekHeader" class="iti-week-sep mono">
+          <span>Week {{ r.weekNum }}</span>
+          <span class="week-meta">{{ r.weekRange }}</span>
+        </li>
         <li
           class="iti-day"
           :class="{ today: isTodayInRange(r.day), past: isPastStop(r.day), future: isFutureStop(r.day) }"
@@ -54,11 +58,23 @@
               {{ glyphFor(forecastFor(r.day).code) }}
               {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°
               <template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
+              <span
+                v-if="bestMorning(r.day)"
+                class="iti-run mono"
+                :title="`Calmest 3-hour window for an early effort, by mean temp + rain probability`"
+              >▸ run {{ bestMorning(r.day) }}</span>
             </p>
             <p v-else-if="weatherTooFar(r.day)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days from today (${weatherStartDate})`">
               · weather in {{ weatherTooFar(r.day) }}d
             </p>
+            <p v-if="sunFor(r.day)" class="iti-sun mono" title="Sunrise → sunset (solar time at this stop)">☀ {{ sunFor(r.day) }}</p>
             <p v-if="r.day.notes" class="iti-notes">{{ r.day.notes }}</p>
+            <ul v-if="photoCount(r.day)" class="iti-photo-strip" :title="`${photoCount(r.day)} photo${photoCount(r.day) === 1 ? '' : 's'}`">
+              <li v-for="(thumb, i) in photoThumbs(r.day)" :key="i" class="iti-photo">
+                <img :src="thumb" alt="" />
+              </li>
+              <li v-if="photoCount(r.day) > 4" class="iti-photo-more mono">+{{ photoCount(r.day) - 4 }}</li>
+            </ul>
           </div>
           <div class="iti-actions">
             <button
@@ -69,11 +85,11 @@
             >+</button>
             <button
               v-if="r.day.lat != null && r.day.lng != null"
-              class="iti-icon"
+              class="iti-icon iti-icon-trail"
               type="button"
               :title="`Find trails near ${r.day.label || 'this stop'}`"
               @click="trailFor = r.day"
-            >🥾</button>
+            >△</button>
             <button class="iti-icon" type="button" :title="`Edit ${r.dayLabel}`" @click="$emit('edit', r.day)">✎</button>
             <button class="iti-icon" type="button" :title="`Remove ${r.dayLabel}`" @click="del(r.day)">×</button>
           </div>
@@ -111,11 +127,17 @@
         <div
           v-if="legShouldShow(r)"
           class="iti-leg mono"
+          :class="{ 'is-short': isShortLeg(r) }"
           :title="r.legNext.title"
         >
           <template v-if="r.legNext.real">
-            ↓ {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
-            <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
+            <template v-if="isShortLeg(r)">
+              ↓ same area · {{ r.legNext.real.km }} km
+            </template>
+            <template v-else>
+              ↓ {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
+              <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
+            </template>
           </template>
           <template v-else>
             ↓ ≈ {{ r.legNext.km }} km
@@ -141,16 +163,19 @@
       :lat="trailFor.lat"
       :lng="trailFor.lng"
       :name="trailFor.label || 'this day'"
-      @close="trailFor = null"
+      @close="onTrailFinderClose"
       @pick="onTrailPick"
+      @preview="(t) => $emit('trail-preview', t)"
     />
   </section>
 </template>
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
+import SunCalc from 'suncalc'
 import { CATEGORIES, todayISO } from '@/util.js'
-import { dailyForecast, glyphFor } from '@/lib/weather.js'
+import { dailyForecast, hourlyForecast, glyphFor } from '@/lib/weather.js'
+import { formatTime } from '@/lib/sun.js'
 import GeocoderSearch from './GeocoderSearch.vue'
 import PasteImportModal from './PasteImportModal.vue'
 import TrailFinderModal from './TrailFinderModal.vue'
@@ -163,7 +188,7 @@ const props = defineProps({
   slug: { type: String, default: null },
 })
 const emit = defineEmits([
-  'add', 'add-bulk', 'add-trail-pin', 'delete', 'go', 'edit',
+  'add', 'add-bulk', 'add-trail-pin', 'trail-preview', 'delete', 'go', 'edit',
   'select-point', 'attach', 'detach',
 ])
 
@@ -217,7 +242,13 @@ function onPasteImport(payload) {
 const trailFor = ref(null)
 function onTrailPick(t) {
   trailFor.value = null
+  emit('trail-preview', null)
   emit('add-trail-pin', t)
+}
+function onTrailFinderClose() {
+  trailFor.value = null
+  // Closing the modal must also clear the hover preview line on the map.
+  emit('trail-preview', null)
 }
 
 const today = computed(() => todayISO())
@@ -258,6 +289,73 @@ async function refreshWeather(days) {
   }
 }
 watch(() => props.days, (next) => { refreshWeather(next || []) }, { immediate: true })
+
+// Per-stop sunrise/sunset (string "HH:MM → HH:MM" in solar time at the stop's
+// longitude) and a "best 3-hour morning slot" from hourly weather. Both are
+// loaded lazily so the row paints immediately and the chip appears as data
+// arrives.
+const sunMap = computed(() => {
+  const out = {}
+  for (const d of props.days) {
+    if (d.id == null || d.lat == null || d.lng == null) continue
+    const t = SunCalc.getTimes(new Date(d.date + 'T12:00:00Z'), d.lat, d.lng)
+    if (!t.sunrise || !t.sunset || isNaN(t.sunrise) || isNaN(t.sunset)) continue
+    out[d.id] = `${formatTime(t.sunrise, d.lng)} → ${formatTime(t.sunset, d.lng)}`
+  }
+  return out
+})
+
+const morningMap = ref({}) // day.id → "best run window" string ("06–08 · 12°")
+async function refreshMorningHours(days) {
+  for (const d of days) {
+    if (d.id == null || d.lat == null || d.lng == null) continue
+    if (morningMap.value[d.id]) continue
+    const hours = await hourlyForecast(d.lat, d.lng, d.date)
+    if (!hours.length) continue
+    const morning = hours.filter((h) => h.hour >= 5 && h.hour <= 11)
+    if (morning.length < 3) continue
+    let best = null
+    for (let i = 0; i <= morning.length - 3; i++) {
+      const slot = morning.slice(i, i + 3)
+      const meanTemp = slot.reduce((s, h) => s + h.temp, 0) / 3
+      const meanRain = slot.reduce((s, h) => s + (h.rainPct || 0), 0) / 3
+      const score = Math.abs(meanTemp - 14) + Math.min(meanRain, 60) * 0.5
+      if (!best || score < best.score) {
+        best = { startHour: slot[0].hour, endHour: slot[2].hour + 1, meanTemp: Math.round(meanTemp), score }
+      }
+    }
+    if (best) {
+      const startStr = String(best.startHour).padStart(2, '0')
+      const endStr = String(best.endHour).padStart(2, '0')
+      morningMap.value = {
+        ...morningMap.value,
+        [d.id]: `${startStr}–${endStr} · ${best.meanTemp}°`,
+      }
+    }
+  }
+}
+watch(() => props.days, (next) => { refreshMorningHours(next || []) }, { immediate: true })
+function bestMorning(d) { return morningMap.value[d.id] || null }
+function sunFor(d) { return sunMap.value[d.id] || null }
+
+// Photo journal: parse the JSON-encoded array on demand. Cached per (id, raw)
+// so we don't re-parse on every keystroke when notes change.
+const photoCache = new Map()
+function parsePhotos(d) {
+  if (!d.photos) return []
+  const cacheKey = `${d.id}:${d.photos.length}`
+  if (photoCache.has(cacheKey)) return photoCache.get(cacheKey)
+  try {
+    const parsed = JSON.parse(d.photos)
+    const arr = Array.isArray(parsed) ? parsed.filter((u) => typeof u === 'string') : []
+    photoCache.set(cacheKey, arr)
+    return arr
+  } catch {
+    return []
+  }
+}
+function photoCount(d) { return parsePhotos(d).length }
+function photoThumbs(d) { return parsePhotos(d).slice(0, 4) }
 
 const form = reactive({ date: today.value, label: '' })
 // Once `days` is populated, default the form to "next day after the last".
@@ -317,10 +415,17 @@ const totalKm = computed(() => {
 //   cleanLabel: strip a leading "Day N — " from any user-typed label so we
 //     don't double-print the day number in the body
 //   legNext: distance + drive estimate to the next stop (when both have coords)
+//   weekHeader/weekNum/weekRange: set on the first row of each new trip-week
+//     so the template can render a quiet "Week 1 / 9–15 May" divider above
+//     the row. Trip-week is anchored on the first stop's date, not ISO weeks,
+//     so the trip's first week starts on day 1 regardless of weekday.
 const rows = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  if (!sorted.length) return []
+  const tripStart = new Date(sorted[0].date)
   const out = []
   let cumulative = 0
+  let lastWeekNum = 0
   for (let i = 0; i < sorted.length; i++) {
     const day = sorted[i]
     const next = i < sorted.length - 1 ? sorted[i + 1] : null
@@ -338,7 +443,19 @@ const rows = computed(() => {
       const real = legFor(day, next)
       legNext = { km, real, title: legTitle(day, next) }
     }
-    out.push({ day, dayLabel, spanISO, cleanLabel, legNext })
+    const dayOffset = Math.floor((new Date(day.date) - tripStart) / 86400000)
+    const weekNum = Math.floor(dayOffset / 7) + 1
+    const weekHeader = weekNum !== lastWeekNum
+    let weekRange = ''
+    if (weekHeader) {
+      const weekStart = new Date(tripStart)
+      weekStart.setUTCDate(weekStart.getUTCDate() + (weekNum - 1) * 7)
+      const weekEnd = new Date(weekStart)
+      weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
+      weekRange = `${weekStart.getUTCDate()}–${weekEnd.getUTCDate()} ${shortMonth(weekEnd.toISOString().slice(0, 10))}`
+      lastWeekNum = weekNum
+    }
+    out.push({ day, dayLabel, spanISO, cleanLabel, legNext, weekHeader, weekNum, weekRange })
     cumulative += span
   }
   return out
@@ -447,6 +564,14 @@ function legShouldShow(row) {
   return true
 }
 
+// "Short" = under 5 km, e.g. Mather Campground (36.05) → BLM (36.10) at the
+// Grand Canyon. These aren't really driving "legs" — flag visually so the
+// trip reads as one extended stop, not two punctuated days.
+function isShortLeg(row) {
+  const km = row.legNext?.real?.km ?? row.legNext?.km
+  return km != null && km < 5
+}
+
 function legKm(a, b) {
   if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null
   const R = 6371
@@ -535,6 +660,24 @@ function legKm(a, b) {
   display: grid;
   gap: 0.25rem;
 }
+.iti-week-sep {
+  margin: 0.5rem 0 0.1rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.iti-week-sep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--cream-edge);
+}
+.iti-week-sep .week-meta { color: var(--ink-faded); opacity: 0.8; }
+.iti-list > .iti-week-sep:first-child { margin-top: 0; }
 .iti-day {
   display: grid;
   grid-template-columns: 36px 1fr auto;
@@ -653,6 +796,11 @@ function legKm(a, b) {
   display: inline-flex;
   align-items: baseline;
   gap: 0.4rem;
+}
+.iti-leg.is-short {
+  opacity: 0.55;
+  font-style: italic;
+  letter-spacing: 0.06em;
 }
 
 /* Attached pins displayed inline under a day card. */
@@ -789,6 +937,58 @@ function legKm(a, b) {
   letter-spacing: 0.04em;
 }
 .iti-wx.is-faded { color: var(--ink-faded); font-style: italic; }
+.iti-sun {
+  margin: 0.05rem 0 0;
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  letter-spacing: 0.06em;
+}
+.iti-day.today .iti-sun { color: rgba(255,255,255,0.75); }
+.iti-run {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.02rem 0.35rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--vermillion);
+  background: var(--paper);
+  border: 1px dotted var(--cream-edge);
+  border-radius: 2px;
+}
+.iti-day.today .iti-run {
+  color: var(--paper);
+  border-color: rgba(255,255,255,0.5);
+  background: var(--vermillion-deep);
+}
+
+.iti-photo-strip {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: flex;
+  gap: 0.2rem;
+  align-items: center;
+}
+.iti-photo {
+  width: 36px;
+  height: 36px;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--cream-edge);
+}
+.iti-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.iti-photo-more {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--ink-faded);
+  margin-left: 0.2rem;
+}
+.iti-day.today .iti-photo-more { color: rgba(255,255,255,0.8); }
 
 .iti-add {
   display: grid;

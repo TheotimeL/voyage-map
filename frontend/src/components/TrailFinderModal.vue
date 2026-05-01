@@ -13,21 +13,48 @@
         </select>
       </p>
 
+      <div class="filter-row mono">
+        <label class="filter-eyebrow">Length</label>
+        <div class="seg" role="tablist">
+          <button
+            v-for="b in lengthBands"
+            :key="b.key"
+            type="button"
+            class="seg-btn"
+            :class="{ on: lengthBand === b.key }"
+            :aria-pressed="lengthBand === b.key"
+            @click="lengthBand = b.key"
+          >{{ b.label }}</button>
+        </div>
+      </div>
+
       <p v-if="loading" class="hint mono">Searching OSM for hiking routes…</p>
       <p v-else-if="error" class="error sm">{{ error }}</p>
-      <p v-else-if="!loading && results.length === 0" class="hint mono">
-        No named trails returned. Widen the radius, or pan/zoom the map and use a different anchor.
+      <p v-else-if="!loading && filtered.length === 0" class="hint mono">
+        <template v-if="results.length">No trails match this length filter — try Any.</template>
+        <template v-else>No named trails returned. Widen the radius, or pan/zoom the map and use a different anchor.</template>
       </p>
 
-      <ol v-if="results.length" class="trails">
-        <li v-for="t in results" :key="t.id">
-          <button class="trail-row" type="button" @click="onPick(t)">
-            <span class="trail-name">{{ t.name }}</span>
+      <ol v-if="filtered.length" class="trails">
+        <li v-for="t in filtered" :key="t.id">
+          <button
+            class="trail-row"
+            type="button"
+            @mouseenter="$emit('preview', t)"
+            @mouseleave="$emit('preview', null)"
+            @focus="$emit('preview', t)"
+            @blur="$emit('preview', null)"
+            @click="onPick(t)"
+          >
+            <span class="trail-row-head">
+              <span class="trail-name">{{ t.name }}</span>
+              <span v-if="t.lengthKm" class="trail-len mono">{{ t.lengthKm }} km</span>
+            </span>
             <span class="trail-tags mono">
-              <template v-if="t.kind">{{ t.kind }}</template>
-              <template v-if="t.sac"> · SAC {{ t.sac }}</template>
-              <template v-if="t.distance"> · {{ t.distance }} km</template>
-              <template v-if="t.ref"> · #{{ t.ref }}</template>
+              <template v-if="t.sacPlain">{{ t.sacPlain }}</template>
+              <template v-else-if="t.kind">{{ t.kind }}</template>
+              <template v-if="t.distFromOrigin != null"> · {{ t.distFromOrigin }} km away</template>
+              <template v-if="t.ref"> · {{ t.ref }}</template>
             </span>
           </button>
         </li>
@@ -41,7 +68,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue'
 import { fetchTrails } from '@/lib/overpass.js'
 import { formatLat, formatLng } from '@/util.js'
 
@@ -50,12 +77,27 @@ const props = defineProps({
   lng: { type: Number, required: true },
   name: { type: String, default: 'this day' },
 })
-const emit = defineEmits(['close', 'pick'])
+const emit = defineEmits(['close', 'pick', 'preview'])
 
 const radiusKm = ref(10)
 const loading = ref(false)
 const error = ref('')
 const results = ref([])
+
+// Length-band filter — the bands match common trail-running targets so a
+// runner planning their week scrolls less. "Any" keeps the unfiltered list.
+const lengthBands = [
+  { key: 'any', label: 'Any', test: () => true },
+  { key: 's',   label: '< 5 km',  test: (km) => km != null && km < 5 },
+  { key: 'm',   label: '5–15 km', test: (km) => km != null && km >= 5 && km < 15 },
+  { key: 'l',   label: '15–30 km',test: (km) => km != null && km >= 15 && km < 30 },
+  { key: 'xl',  label: '30+ km',  test: (km) => km != null && km >= 30 },
+]
+const lengthBand = ref('any')
+const filtered = computed(() => {
+  const band = lengthBands.find((b) => b.key === lengthBand.value) || lengthBands[0]
+  return results.value.filter((t) => band.test(t.lengthKm))
+})
 
 async function search() {
   loading.value = true
@@ -71,12 +113,17 @@ watch(radiusKm, search)
 onMounted(search)
 
 function onPick(t) {
+  // Drop any preview line so the parent can replace with the persistent pin.
+  emit('preview', null)
   emit('pick', t)
 }
 
 function onEsc(e) { if (e.key === 'Escape') emit('close') }
 onMounted(() => window.addEventListener('keydown', onEsc))
-onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onEsc)
+  emit('preview', null)
+})
 </script>
 
 <style scoped>
@@ -128,13 +175,66 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
   font: inherit;
   color: var(--ink);
 }
-.trail-row:hover {
+.trail-row:hover,
+.trail-row:focus-visible {
   background: var(--paper);
   border-color: var(--ink);
   color: var(--vermillion);
+  outline: none;
+}
+.trail-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  justify-content: space-between;
 }
 .trail-name { font-weight: 600; }
+.trail-len {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--vermillion);
+  background: var(--paper);
+  border: 1px solid var(--cream-edge);
+  padding: 0.05rem 0.35rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
 .trail-tags { font-size: 0.72rem; color: var(--ink-soft); letter-spacing: 0.04em; }
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px dotted var(--cream-edge);
+  margin-bottom: 0.3rem;
+}
+.filter-eyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--cream-edge);
+  border-radius: 999px;
+  overflow: hidden;
+  flex-wrap: wrap;
+}
+.seg-btn {
+  background: transparent;
+  border: none;
+  padding: 0.18rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.seg-btn:hover { color: var(--ink); }
+.seg-btn.on { background: var(--ink); color: var(--paper); }
 .row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.4rem; }
 .hint { font-size: 0.78rem; color: var(--ink-faded); margin: 0.5rem 0; letter-spacing: 0.06em; }
 .error.sm { font-size: 0.85rem; color: var(--vermillion-deep); margin: 0.4rem 0; }

@@ -2,18 +2,33 @@
   <div class="map-fab-wrap">
     <Transition name="fab-pop">
       <div v-if="open && !armed" class="fab-menu paper" role="menu">
+        <p class="fab-menu-eyebrow mono">Add to trip</p>
+        <button type="button" class="fab-menu-item" @click="pick('stop')">
+          <span class="fab-menu-icon" aria-hidden="true">▣</span>
+          <span class="fab-menu-text">
+            <strong>Add a stop</strong>
+            <em>A place you'll sleep or hang out</em>
+          </span>
+        </button>
         <button type="button" class="fab-menu-item" @click="pick('pin')">
-          <span class="fab-menu-icon">📍</span>
+          <span class="fab-menu-icon" aria-hidden="true">⌖</span>
           <span class="fab-menu-text">
             <strong>Drop a pin</strong>
             <em>Click anywhere on the map</em>
           </span>
         </button>
         <button type="button" class="fab-menu-item" @click="pick('search')">
-          <span class="fab-menu-icon">🔎</span>
+          <span class="fab-menu-icon" aria-hidden="true">⚲</span>
           <span class="fab-menu-text">
             <strong>Search a place</strong>
             <em>Find by name</em>
+          </span>
+        </button>
+        <button type="button" class="fab-menu-item" @click="pick('trail')">
+          <span class="fab-menu-icon" aria-hidden="true">△</span>
+          <span class="fab-menu-text">
+            <strong>Trails near here</strong>
+            <em>OSM hiking + running routes</em>
           </span>
         </button>
       </div>
@@ -32,11 +47,11 @@ const props = defineProps({
   // The popover hides itself in that case so the × on the FAB is unambiguous.
   armed: { type: Boolean, default: false },
 })
-const emit = defineEmits(['drop', 'search'])
+const emit = defineEmits(['drop', 'search', 'add-stop', 'find-trails'])
 
 const open = ref(false)
 const armedTitle = computed(() =>
-  props.armed ? 'Cancel — click × to exit drop-mode' : 'Add a pin, place, or day',
+  props.armed ? 'Cancel — click × to exit drop-mode' : 'Add a pin, place, stop, or trail',
 )
 
 function onClick() {
@@ -52,6 +67,8 @@ function pick(kind) {
   open.value = false
   if (kind === 'pin') emit('drop', { cancel: false })
   else if (kind === 'search') emit('search')
+  else if (kind === 'stop') emit('add-stop')
+  else if (kind === 'trail') emit('find-trails')
 }
 
 // Click-outside to close the menu.

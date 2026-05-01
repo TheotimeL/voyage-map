@@ -42,6 +42,10 @@ def _migrate_inline() -> None:
         if "itinerary_day_id" not in cols:
             conn.execute(text("ALTER TABLE points ADD COLUMN itinerary_day_id INTEGER REFERENCES itinerary_days(id)"))
             logger.info("Migrated: added points.itinerary_day_id")
+        iti_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(itinerary_days)"))}
+        if "photos" not in iti_cols:
+            conn.execute(text("ALTER TABLE itinerary_days ADD COLUMN photos TEXT"))
+            logger.info("Migrated: added itinerary_days.photos")
 
 
 @asynccontextmanager

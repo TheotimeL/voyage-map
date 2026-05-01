@@ -74,5 +74,9 @@ class ItineraryDay(Base):
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Photo journal: JSON array of base64 data-URLs ("data:image/jpeg;base64,…").
+    # Storing inline keeps the snapshot self-contained for offline sync; the
+    # tradeoff is row size — the schema cap (5 MB) is a soft fence per stop.
+    photos: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     map: Mapped[Map] = relationship(back_populates="itinerary")

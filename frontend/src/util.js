@@ -44,6 +44,18 @@ export function parseGPX(xmlText) {
   return { coords: parsed.coords, elevations: parsed.elevations, name }
 }
 
+// Build a minimal GPX <trk> from a coords list so OSM-derived trails (which
+// have no elevation, just a polyline) flow through the same renderTrack /
+// elevation pipeline as imported GPX files. Keep it tight: one segment, no
+// metadata beyond the optional name.
+export function coordsToGPX(coords, name) {
+  const trkpts = coords
+    .map(([lat, lng]) => `<trkpt lat="${lat}" lon="${lng}"/>`)
+    .join('')
+  const safeName = name ? String(name).replace(/[<>&]/g, '') : ''
+  return `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="voyage-map"><trk>${safeName ? `<name>${safeName}</name>` : ''}<trkseg>${trkpts}</trkseg></trk></gpx>`
+}
+
 export const TRACK_PALETTE = ['#0a4d5b', '#5e6b3b', '#6b3a5a', '#1f3851', '#a85a2b', '#3b6b8a']
 
 export function trackColor(index) {
