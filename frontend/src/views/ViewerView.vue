@@ -39,7 +39,8 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import { api } from '@/api.js'
-import { parseGPX, trackColor } from '@/util.js'
+import { CATEGORIES, parseGPX, trackColor } from '@/util.js'
+import { buildTipNode } from '@/lib/tooltip.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -156,7 +157,8 @@ function renderAll() {
       zIndexOffset: 600,
     }).addTo(leaflet)
     if (d.label) {
-      m.bindTooltip(`<span class="iti-tip-num">Day ${num}</span><span class="iti-tip-label">${d.label}</span>`, {
+      // DOM-built tip — see lib/tooltip.js. Prevents XSS via user-typed labels.
+      m.bindTooltip(buildTipNode(`Day ${num}`, d.label), {
         permanent: true,
         direction: 'right',
         offset: [10, 0],

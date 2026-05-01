@@ -283,6 +283,7 @@ import { rememberMap, updateRecentStats } from '@/lib/recents.js'
 import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 import { writeSnapshot } from '@/lib/snapshot.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
+import { buildTipNode } from '@/lib/tooltip.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -784,10 +785,9 @@ function renderItinerary() {
       : ''
     // Two-part tip so CSS can hide the label half at lower zooms — keeps
     // the trip readable when zoomed out while preserving detail when in.
-    const tipHtml = cleanLabel
-      ? `<span class="iti-tip-num">${dayChip}</span><span class="iti-tip-label">${cleanLabel}</span>`
-      : `<span class="iti-tip-num">${dayChip}</span>`
-    m.bindTooltip(tipHtml, {
+    // Built as a DOM node (not innerHTML) so user-typed labels can't smuggle
+    // <img onerror> or other HTML — Leaflet renders nodes as-is.
+    m.bindTooltip(buildTipNode(dayChip, cleanLabel), {
       permanent: true,
       direction: 'right',
       offset: [10, 0],
