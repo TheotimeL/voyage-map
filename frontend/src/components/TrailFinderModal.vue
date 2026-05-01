@@ -24,10 +24,7 @@
           <button class="trail-row" type="button" @click="onPick(t)">
             <span class="trail-name">{{ t.name }}</span>
             <span class="trail-tags mono">
-              <template v-if="t.kind">{{ t.kind }}</template>
-              <template v-if="t.sac"> · SAC {{ t.sac }}</template>
-              <template v-if="t.distance"> · {{ t.distance }} km</template>
-              <template v-if="t.ref"> · #{{ t.ref }}</template>
+              <template v-if="trailTags(t).length">{{ trailTags(t).join(' · ') }}</template>
             </span>
           </button>
         </li>
@@ -69,6 +66,35 @@ async function search() {
 }
 watch(radiusKm, search)
 onMounted(search)
+
+// Translate the SAC mountaineering scale (`hiking`, `mountain_hiking`,
+// `demanding_mountain_hiking`, `alpine_hiking`, …) into the plain words a
+// real walker would use. Anything we don't recognise gets dropped — empty
+// space beats "SAC mountain_hiking" jargon in the trail list.
+const SAC_PLAIN = {
+  hiking: 'easy',
+  mountain_hiking: 'moderate',
+  demanding_mountain_hiking: 'demanding',
+  alpine_hiking: 'alpine',
+  demanding_alpine_hiking: 'demanding alpine',
+  difficult_alpine_hiking: 'difficult alpine',
+}
+function sacPlain(sac) {
+  if (!sac) return null
+  return SAC_PLAIN[sac] || null
+}
+
+// The chip after each trail name. We deliberately drop the raw OSM `kind`
+// (values like "mountain_hiking" leaked through) and only keep tags a user
+// can act on: the human-friendly difficulty, distance, and route ref.
+function trailTags(t) {
+  const out = []
+  const sp = sacPlain(t.sac)
+  if (sp) out.push(sp)
+  if (t.distance) out.push(`${t.distance} km`)
+  if (t.ref) out.push(`#${t.ref}`)
+  return out
+}
 
 function onPick(t) {
   emit('pick', t)
