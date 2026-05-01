@@ -106,21 +106,57 @@
             >−</button>
           </li>
           <li v-if="attachOpenForDay === r.day.id" class="day-pin-picker">
-            <p v-if="!unattachedPins.length" class="picker-empty mono">
-              No unattached pins. Drop one on the map first.
-              <button type="button" class="picker-cancel" @click="attachOpenForDay = null">cancel</button>
+            <p v-if="!pickerCandidatesAll.length" class="picker-empty mono">
+              No pins yet. Drop one on the map first.
+              <button type="button" class="picker-cancel" @click="closePicker">cancel</button>
             </p>
             <template v-else>
-              <p class="picker-eyebrow mono">Attach a pin to {{ r.dayLabel }}</p>
-              <ul class="picker-list">
-                <li v-for="p in unattachedPins" :key="p.id">
-                  <button type="button" class="picker-item" @click.stop="pickAttach(r.day.id, p.id)">
-                    <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
-                    <span>{{ p.title }}</span>
-                  </button>
-                </li>
-              </ul>
-              <button type="button" class="picker-cancel mono" @click="attachOpenForDay = null">cancel</button>
+              <p class="picker-eyebrow mono">Attach or move a pin to {{ r.dayLabel }}</p>
+              <input
+                v-model="pickerQuery"
+                type="text"
+                class="field picker-filter"
+                placeholder="Filter by title…"
+                @click.stop
+                @keydown.esc.stop.prevent="closePicker"
+              />
+              <p
+                v-if="!pickerVisible(r.day.id).length"
+                class="picker-empty mono"
+              >No matches.</p>
+              <template v-else>
+                <p
+                  v-if="pickerVisible(r.day.id, 'unattached').length"
+                  class="picker-section mono"
+                >Unattached</p>
+                <ul v-if="pickerVisible(r.day.id, 'unattached').length" class="picker-list">
+                  <li v-for="p in pickerVisible(r.day.id, 'unattached')" :key="p.id">
+                    <button type="button" class="picker-item" @click.stop="pickAttach(r.day.id, p.id)">
+                      <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
+                      <span class="picker-item-title">{{ p.title }}</span>
+                    </button>
+                  </li>
+                </ul>
+                <p
+                  v-if="pickerVisible(r.day.id, 'attached').length"
+                  class="picker-section mono"
+                >Already attached elsewhere</p>
+                <ul v-if="pickerVisible(r.day.id, 'attached').length" class="picker-list">
+                  <li v-for="p in pickerVisible(r.day.id, 'attached')" :key="p.id">
+                    <button
+                      type="button"
+                      class="picker-item picker-item-attached"
+                      :title="`Move from ${otherDayLabel(p) || 'another day'} to ${r.dayLabel}`"
+                      @click.stop="pickAttach(r.day.id, p.id)"
+                    >
+                      <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
+                      <span class="picker-item-title">{{ p.title }}</span>
+                      <span class="picker-item-where mono">{{ otherDayLabel(p) }}</span>
+                    </button>
+                  </li>
+                </ul>
+              </template>
+              <button type="button" class="picker-cancel mono" @click="closePicker">cancel</button>
             </template>
           </li>
         </ul>
@@ -211,13 +247,77 @@ const unattachedPins = computed(() =>
   (props.points || []).filter((p) => p.itinerary_day_id == null && p.title),
 )
 
+// All titled pins, regardless of attachment — the picker shows both groups
+// so the user can move a pin from one day to another in a single tap rather
+// than the previous detach-then-reattach dance.
+const pickerCandidatesAll = computed(() =>
+  (props.points || []).filter((p) => p.title),
+)
+
+// Map day-id → display label so "Already attached elsewhere" rows can hint
+// at the current owner. Falls back to date when there's no label.
+const dayLabelById = computed(() => {
+  const m = new Map()
+  for (const d of props.days || []) m.set(d.id, d.label || d.date)
+  return m
+})
+function otherDayLabel(pin) {
+  if (pin.itinerary_day_id == null) return ''
+  return dayLabelById.value.get(pin.itinerary_day_id) || ''
+}
+
+// Debounced filter — typed via picker-filter input, applied case-insensitively
+// against pin titles. 100ms is enough to absorb a fast typist's keystrokes
+// without making the list feel laggy.
+const pickerQuery = ref('')
+const pickerQueryDebounced = ref('')
+let _pickerDebounce = null
+watch(pickerQuery, (v) => {
+  if (_pickerDebounce) clearTimeout(_pickerDebounce)
+  _pickerDebounce = setTimeout(() => { pickerQueryDebounced.value = v }, 100)
+})
+
+function pickerVisible(currentDayId, group) {
+  const q = pickerQueryDebounced.value.trim().toLowerCase()
+  let pins = pickerCandidatesAll.value
+  if (q) pins = pins.filter((p) => (p.title || '').toLowerCase().includes(q))
+  // The picker is opened from a specific day — drop pins already attached to
+  // *that* day from both groups (they're listed above the picker as removable
+  // chips). Pins on other days fall into "attached", everything else into
+  // "unattached".
+  if (group === 'unattached') {
+    return pins.filter((p) => p.itinerary_day_id == null)
+  }
+  if (group === 'attached') {
+    return pins.filter((p) =>
+      p.itinerary_day_id != null && p.itinerary_day_id !== currentDayId,
+    )
+  }
+  // No group passed — used by template's "any matches?" check.
+  return pins.filter((p) => p.itinerary_day_id !== currentDayId)
+}
+
 // Open-state: when set, that day's "attach" picker is open. Clicking outside
 // or selecting a pin closes it.
 const attachOpenForDay = ref(null)
 function pickAttach(dayId, pointId) {
+  // MapView's onAttachPoint just PATCHes itinerary_day_id, so the same call
+  // path handles both first-time attach and reparent-from-another-day.
   emit('attach', { pointId, dayId })
-  attachOpenForDay.value = null
+  closePicker()
 }
+function closePicker() {
+  attachOpenForDay.value = null
+  pickerQuery.value = ''
+  pickerQueryDebounced.value = ''
+}
+// Reset the filter when switching between days' pickers, so each fresh open
+// starts empty.
+watch(attachOpenForDay, (next) => {
+  if (next == null) return
+  pickerQuery.value = ''
+  pickerQueryDebounced.value = ''
+})
 
 const showPaste = ref(false)
 // Inline add-day disclosure — collapsed by default so the list breathes.
@@ -900,6 +1000,39 @@ function legKm(a, b) {
   cursor: pointer;
 }
 .picker-item:hover { background: var(--paper); color: var(--vermillion); }
+.picker-item-attached {
+  /* Slightly faded so the unattached group reads as the primary action,
+     while still being one click to reparent. */
+  grid-template-columns: auto 1fr auto;
+  opacity: 0.85;
+}
+.picker-item-attached:hover { opacity: 1; }
+.picker-item-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker-item-where {
+  font-size: 0.66rem;
+  color: var(--ink-faded);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 8rem;
+}
+.picker-section {
+  margin: 0.15rem 0 0;
+  font-size: 0.58rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.picker-filter {
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
+  width: 100%;
+}
 .picker-empty {
   margin: 0;
   font-size: 0.74rem;
