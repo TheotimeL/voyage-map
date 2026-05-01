@@ -377,3 +377,16 @@ body.drop-mode .leaflet-grab .leaflet-interactive { cursor: crosshair !important
 
 [data-theme="dark"] .pin { filter: drop-shadow(0 0 1px rgba(255,255,255,0.4)); }
 [data-theme="dark"] .leaflet-container { background: #0c0e10; }
+
+/* Theme-toggle transition — paint the palette change as a quick wash
+   instead of a hard flip. Scoped to body and .paper surfaces (the dock,
+   sheet, modals); the Leaflet tile layer swaps as a hard server boundary
+   so we deliberately leave it untransitioned. */
+body,
+.paper {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  body,
+  .paper { transition: none; }
+}
