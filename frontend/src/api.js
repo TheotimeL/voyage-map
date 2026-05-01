@@ -1,5 +1,7 @@
 // Thin fetch wrapper. All endpoints are scoped under /api.
 
+import { readSnapshot, writeSnapshot } from '@/lib/snapshot.js'
+
 async function request(method, path, body) {
   const res = await fetch(`/api${path}`, {
     method,
@@ -14,10 +16,33 @@ async function request(method, path, body) {
   return res.json()
 }
 
+// Fetch a map and shadow-copy the response into IndexedDB. Mutating endpoints
+// don't return the full map, so we re-read after writes (see `refreshMap`
+// below) to keep the snapshot consistent.
+async function fetchAndStash(slug) {
+  const data = await request('GET', `/maps/${slug}`)
+  // Don't await — storage failures shouldn't block the UI.
+  writeSnapshot(slug, data)
+  return data
+}
+
 export const api = {
   createMap: (payload) => request('POST', '/maps', payload),
-  getMap: (slug) => request('GET', `/maps/${slug}`),
-  patchMap: (slug, payload) => request('PATCH', `/maps/${slug}`, payload),
+  getMap: (slug) => fetchAndStash(slug),
+  patchMap: async (slug, payload) => {
+    const out = await request('PATCH', `/maps/${slug}`, payload)
+    writeSnapshot(slug, out)
+    return out
+  },
+
+  // Snapshot-first load: returns whatever IndexedDB has now (possibly null),
+  // and a `refresh` promise that resolves with the fresh server payload.
+  // Lets MapView render instantly from disk on every cold start.
+  getMapWithSnapshot: async (slug) => {
+    const cached = await readSnapshot(slug)
+    const refresh = fetchAndStash(slug)
+    return { cached, refresh }
+  },
 
   addPoint: (slug, payload) => request('POST', `/maps/${slug}/points`, payload),
   patchPoint: (slug, id, payload) => request('PATCH', `/maps/${slug}/points/${id}`, payload),
@@ -29,6 +54,12 @@ export const api = {
   patchItineraryDay: (slug, id, payload) => request('PATCH', `/maps/${slug}/itinerary/${id}`, payload),
   deleteItineraryDay: (slug, id) => request('DELETE', `/maps/${slug}/itinerary/${id}`),
   clearItinerary: (slug) => request('DELETE', `/maps/${slug}/itinerary`),
+
+  // Re-pull the full map and update the snapshot. Call after a batch of
+  // writes when you want the on-disk mirror to reflect the new state — most
+  // single-pin/day mutations don't need this since the in-memory state is
+  // already merged and the next page load will refresh anyway.
+  refreshSnapshot: (slug) => fetchAndStash(slug),
 }
 
 // Geocoding goes through our FastAPI proxy (`/api/geocode`, `/api/reverse`)

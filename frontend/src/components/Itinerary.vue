@@ -2,12 +2,31 @@
   <section class="iti">
     <div class="iti-head">
       <button v-if="todayDay" class="btn btn-tiny" type="button" @click="goToday">Today →</button>
-      <button class="btn btn-tiny btn-paste" type="button" @click="showPaste = true" title="Bulk import dates from a spreadsheet">Paste schedule…</button>
+      <button
+        class="btn btn-tiny btn-add-day"
+        type="button"
+        :class="{ open: addOpen }"
+        @click="addOpen = !addOpen"
+      >{{ addOpen ? '× Close' : '+ Add day' }}</button>
+      <button class="btn btn-tiny btn-paste" type="button" @click="showPaste = true" title="Bulk import dates from a spreadsheet">Paste…</button>
     </div>
+
+    <Transition name="reveal">
+      <section v-if="addOpen" class="add-inline">
+        <form class="iti-add" @submit.prevent="addEmptyDay">
+          <input v-model="form.date" type="date" class="field add-date" :min="firstISO" required />
+          <button class="btn btn-add" type="submit" title="Add an empty day with no location">+ Day</button>
+        </form>
+        <GeocoderSearch
+          placeholder="…or search a place to drop on this day"
+          :bias="bias"
+          @pick="onAddPick"
+        />
+      </section>
+    </Transition>
 
     <p v-if="days.length" class="iti-meta mono">
       {{ uniqueDateCount }} {{ uniqueDateCount === 1 ? 'day' : 'days' }}
-      <template v-if="days.length > uniqueDateCount"> · {{ days.length }} stops</template>
       <template v-if="todayDayNum"> · Day {{ todayDayNum }} / {{ uniqueDateCount }}</template>
       <template v-else-if="firstFutureIdx >= 0"> · {{ daysUntil(days[firstFutureIdx].date) }}</template>
       <template v-if="totalDriveKm > 0"> · {{ totalDriveKm.toLocaleString() }} km · {{ fmtMinutes(totalDriveMin) }} drive</template>
@@ -30,7 +49,7 @@
           </div>
           <div class="iti-body">
             <button class="iti-label" type="button" @click="$emit('go', r.day)">
-              <span class="day-num mono">DAY {{ r.dayIndex }}</span>
+              <span v-if="r.dateHead" class="day-num mono">DAY {{ r.dayIndex }}</span>
               <span class="day-label">{{ r.cleanLabel || 'Untitled' }}</span>
               <span v-if="r.day.lat == null" class="locate-hint" title="No location yet — click to search">⌖</span>
             </button>
@@ -39,8 +58,8 @@
               {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°
               <template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
             </p>
-            <p v-else-if="weatherTooFar(r.day)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days — checks back from ${weatherStartDate}`">
-              · forecast in {{ weatherTooFar(r.day) }}d
+            <p v-else-if="weatherTooFar(r.day)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days from today (${weatherStartDate})`">
+              · weather in {{ weatherTooFar(r.day) }}d
             </p>
             <p v-if="r.day.notes" class="iti-notes">{{ r.day.notes }}</p>
           </div>
@@ -93,7 +112,7 @@
           </li>
         </ul>
         <div
-          v-if="r.legNext && r.legNext.km != null"
+          v-if="legShouldShow(r)"
           class="iti-leg mono"
           :title="r.legNext.title"
         >
@@ -107,20 +126,10 @@
         </div>
       </template>
     </ol>
-    <p v-else class="hint mono">No days yet — add one below.</p>
-
-    <section class="add-block">
-      <p class="add-eyebrow mono">Add a day</p>
-      <form class="iti-add" @submit.prevent="addEmptyDay">
-        <input v-model="form.date" type="date" class="field add-date" :min="firstISO" required />
-        <button class="btn btn-add" type="submit" title="Add an empty day with no location">+ Day</button>
-      </form>
-      <GeocoderSearch
-        placeholder="…or search a place to drop on this day"
-        :bias="bias"
-        @pick="onAddPick"
-      />
-    </section>
+    <p v-else class="hint mono">
+      No days yet —
+      <button type="button" class="hint-link" @click="addOpen = true">add the first one</button>.
+    </p>
 
     <PasteImportModal
       v-if="showPaste"
@@ -189,6 +198,12 @@ function pickAttach(dayId, pointId) {
 }
 
 const showPaste = ref(false)
+// Inline add-day disclosure — collapsed by default so the list breathes.
+// Auto-opens when the trip is empty so the first add still feels obvious.
+const addOpen = ref(false)
+watch(() => props.days?.length, (n) => {
+  if (!n) addOpen.value = true
+}, { immediate: true })
 const defaultYear = computed(() => {
   if (props.days.length) return parseInt(props.days[0].date.slice(0, 4), 10)
   return new Date().getFullYear()
@@ -390,12 +405,15 @@ function addEmptyDay() {
   if (!form.date) return
   emit('add', { date: form.date, label: null })
   form.date = suggestedNewDate.value
+  // Stay open after empty-day adds — the user is likely adding several in a row.
 }
 function onAddPick(result) {
   if (!form.date) return
   const label = result.label.split(',')[0].trim().slice(0, 200) || null
   emit('add', { date: form.date, label, lat: result.lat, lng: result.lng })
   form.date = suggestedNewDate.value
+  // Picking a place is a "completion" gesture — collapse so the new row is visible.
+  addOpen.value = false
 }
 
 function del(d) {
@@ -408,6 +426,15 @@ function goToday() {
 
 // Great-circle distance between two days that both carry coords. Returns
 // null when either day lacks a position.
+// Hide same-spot legs (e.g. Day 1 Excalibur → Day 2 Excalibur) — they print
+// as "↓ 0 km · 0 min" and clutter the list. Mirrors the map's silencing rule.
+function legShouldShow(row) {
+  if (!row.legNext || row.legNext.km == null) return false
+  if (row.legNext.real && row.legNext.real.km < 1) return false
+  if (!row.legNext.real && row.legNext.km < 1) return false
+  return true
+}
+
 function legKm(a, b) {
   if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null
   const R = 6371
@@ -432,6 +459,19 @@ function legKm(a, b) {
   margin-top: -0.1rem;
   flex-wrap: wrap;
 }
+.btn-add-day {
+  background: var(--vermillion);
+  color: var(--paper);
+  border: none;
+  box-shadow: 0 1px 0 var(--vermillion-deep);
+}
+.btn-add-day:hover { background: var(--vermillion-deep); }
+.btn-add-day.open {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  box-shadow: none;
+}
 .btn-paste {
   background: var(--paper);
   color: var(--ink);
@@ -443,6 +483,30 @@ function legKm(a, b) {
   color: var(--paper);
   border-color: var(--ink);
   border-style: solid;
+}
+
+.add-inline {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.7rem 0.7rem 0.8rem;
+  margin-bottom: 0.4rem;
+  background: var(--cream);
+  border: 1px dashed var(--cream-edge);
+  border-radius: 4px;
+}
+.reveal-enter-active, .reveal-leave-active {
+  transition: opacity 160ms ease, transform 160ms ease, max-height 200ms ease;
+  overflow: hidden;
+}
+.reveal-enter-from, .reveal-leave-to { opacity: 0; transform: translateY(-4px); }
+.hint-link {
+  background: transparent;
+  border: none;
+  color: var(--vermillion);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
 }
 .iti-meta {
   margin: 0;
@@ -565,6 +629,9 @@ function legKm(a, b) {
 .iti-icon:hover { color: var(--vermillion); background: var(--cream); }
 .iti-day.today .iti-icon { color: rgba(255,255,255,0.7); }
 .iti-day.today .iti-icon:hover { color: var(--paper); background: var(--vermillion-deep); }
+@media (max-width: 720px) {
+  .iti-icon { padding: 0.55rem 0.55rem; font-size: 1rem; }
+}
 
 .iti-leg {
   font-size: 0.66rem;
@@ -711,24 +778,6 @@ function legKm(a, b) {
 }
 .iti-wx.is-faded { color: var(--ink-faded); font-style: italic; }
 
-.add-block {
-  position: sticky;
-  bottom: 0;
-  margin-top: 1rem;
-  padding: 0.8rem 0 0.4rem;
-  border-top: 1px dashed var(--cream-edge);
-  background: var(--paper);
-  display: grid;
-  gap: 0.5rem;
-  z-index: 2;
-}
-.add-eyebrow {
-  font-size: 0.65rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-faded);
-  margin: 0;
-}
 .iti-add {
   display: grid;
   grid-template-columns: 1fr auto;

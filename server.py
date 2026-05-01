@@ -24,6 +24,7 @@ from api.itinerary import router as itinerary_router
 from api.maps import router as maps_router
 from api.overpass import router as overpass_router
 from api.points import router as points_router
+from api.route import router as route_router
 from services.db import Base, engine
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ app.include_router(points_router, prefix="/api")
 app.include_router(itinerary_router, prefix="/api")
 app.include_router(overpass_router, prefix="/api")
 app.include_router(geocode_router, prefix="/api")
+app.include_router(route_router, prefix="/api")
 
 
 @app.get("/api/health")

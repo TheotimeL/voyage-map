@@ -9,6 +9,11 @@
       <template #header>
         <div class="dock-head-row">
           <RouterLink :to="{ path: '/', query: { home: 1 } }" class="dock-back mono" title="Back to all voyages">← Voyages</RouterLink>
+          <span
+            v-if="offlineSnapshot"
+            class="offline-badge mono"
+            title="No network — showing the last copy saved on this device. Edits will fail until you're back online."
+          >⤬ offline · cached</span>
           <div class="dock-head-actions">
             <button v-if="hasContent" class="head-icon mono" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
             <button class="head-icon mono" type="button" :title="copied ? 'Link copied' : 'Copy share link'" @click="copyUrl">{{ copied ? '✓' : '⧉' }}</button>
@@ -25,7 +30,6 @@
             @keydown.enter="$event.target.blur()"
           />
         </h2>
-        <p v-if="headerSummary" class="head-summary mono">{{ headerSummary }}</p>
       </template>
 
       <template #places>
@@ -35,14 +39,26 @@
         </button>
         <p v-if="locateError" class="error sm">{{ locateError }}</p>
         <div class="pins-filter mono">
-          <button
-            type="button"
-            class="filter-toggle"
-            :class="{ on: showAllPins }"
-            :title="showAllPins ? 'Hide pins already attached to a day' : 'Show all pins, including those attached to days'"
-            @click="showAllPins = !showAllPins"
-          >{{ showAllPins ? '✓ Showing all' : 'Wishlist only' }}</button>
-          <span class="filter-meta">{{ pinsTabPoints.length }} of {{ (mapData.points || []).length }}</span>
+          <span class="filter-eyebrow">Show</span>
+          <div class="seg" role="tablist">
+            <button
+              type="button"
+              class="seg-btn"
+              :class="{ on: !showAllPins }"
+              :aria-pressed="!showAllPins"
+              title="Pins not yet attached to any day"
+              @click="showAllPins = false"
+            >Unplanned</button>
+            <button
+              type="button"
+              class="seg-btn"
+              :class="{ on: showAllPins }"
+              :aria-pressed="showAllPins"
+              title="Every pin, including those linked to a day"
+              @click="showAllPins = true"
+            >All</button>
+          </div>
+          <span class="filter-meta">{{ pinsTabPoints.length }} / {{ (mapData.points || []).length }}</span>
         </div>
         <CategoryFilters :points="pinsTabPoints" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
         <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
@@ -125,7 +141,6 @@
         :armed="dropMode"
         @drop="onFabDrop"
         @search="onFabSearch"
-        @day="onFabDay"
       />
       <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
 
@@ -220,6 +235,7 @@ import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap, updateRecentStats } from '@/lib/recents.js'
 import { routeLeg, fmtMinutes } from '@/lib/routing.js'
+import { writeSnapshot } from '@/lib/snapshot.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
 
 const props = defineProps({
@@ -438,7 +454,7 @@ watch(
   () => mapData.value && [
     (mapData.value.points || []).length,
     (mapData.value.points || []).filter((p) => p.category === 'trail').length,
-    (mapData.value.itinerary || []).length,
+    new Set((mapData.value.itinerary || []).map((d) => d.date)).size,
   ],
   (next) => {
     if (!next || !mapData.value) return
@@ -446,9 +462,19 @@ watch(
     updateRecentStats(props.slug, {
       points: (mapData.value.points || []).length - trails,
       trails,
-      days: (mapData.value.itinerary || []).length,
+      days: new Set((mapData.value.itinerary || []).map((d) => d.date)).size,
     })
   },
+)
+
+// Mirror the live in-memory map into IndexedDB so the next cold-start picks
+// up every mutation, not just whatever the last server fetch returned.
+// Fire-and-forget — storage failures (private mode, quota, etc.) shouldn't
+// disturb the UI.
+watch(
+  () => mapData.value,
+  (next) => { if (next) writeSnapshot(props.slug, next) },
+  { deep: true },
 )
 
 function toggleCat(key) {
@@ -543,29 +569,69 @@ let dragCounter = 0
 
 const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
 
+// True while we're showing data that came from IndexedDB without a fresh
+// network round-trip. The banner flips off as soon as the background refresh
+// resolves with a real server payload.
+const offlineSnapshot = ref(false)
+
+function adoptMap(m, { fromSnapshot = false } = {}) {
+  mapData.value = m
+  titleDraft.value = m.title || ''
+  offlineSnapshot.value = fromSnapshot
+  rememberMap(
+    m.slug,
+    m.title,
+    {
+      points: (m.points || []).filter((p) => p.category !== 'trail').length,
+      trails: (m.points || []).filter((p) => p.category === 'trail').length,
+      days: new Set((m.itinerary || []).map((d) => d.date)).size,
+    },
+    { lastCenter: { lat: m.center_lat, lng: m.center_lng } },
+  )
+}
+
 onMounted(async () => {
   try {
-    const m = await api.getMap(props.slug)
-    mapData.value = m
-    titleDraft.value = m.title || ''
-    rememberMap(
-      m.slug,
-      m.title,
-      {
-        points: (m.points || []).filter((p) => p.category !== 'trail').length,
-        trails: (m.points || []).filter((p) => p.category === 'trail').length,
-        days: (m.itinerary || []).length,
-      },
-      { lastCenter: { lat: m.center_lat, lng: m.center_lng } },
-    )
-    loading.value = false
-    await nextTick()
-    initLeaflet()
+    const { cached, refresh } = await api.getMapWithSnapshot(props.slug)
 
-    const today = todayISO()
-    const day = (mapData.value.itinerary || []).find((d) => d.date === today)
-    if (day && day.lat != null && day.lng != null && leaflet) {
-      leaflet.setView([day.lat, day.lng], 11)
+    // Render the snapshot immediately when we have one — this is the whole
+    // point of the IndexedDB layer: cold-start in the van takes ~0ms instead
+    // of waiting on a (possibly failing) request.
+    if (cached) {
+      adoptMap(cached, { fromSnapshot: true })
+      loading.value = false
+      await nextTick()
+      initLeaflet()
+      const today = todayISO()
+      const day = (mapData.value.itinerary || []).find((d) => d.date === today)
+      if (day && day.lat != null && day.lng != null && leaflet) {
+        leaflet.setView([day.lat, day.lng], 11)
+      }
+    }
+
+    let fresh = null
+    try {
+      fresh = await refresh
+    } catch (netErr) {
+      // No snapshot AND no network = real error. Otherwise leave the cached
+      // copy in place and show the offline badge.
+      if (!cached) throw netErr
+      offlineSnapshot.value = true
+      return
+    }
+
+    adoptMap(fresh, { fromSnapshot: false })
+    if (!cached) {
+      // First-ever load on this device — wait for the fresh payload before
+      // mounting Leaflet, same flow as before the snapshot layer existed.
+      loading.value = false
+      await nextTick()
+      initLeaflet()
+      const today = todayISO()
+      const day = (mapData.value.itinerary || []).find((d) => d.date === today)
+      if (day && day.lat != null && day.lng != null && leaflet) {
+        leaflet.setView([day.lat, day.lng], 11)
+      }
     }
   } catch (e) {
     error.value = 'This map could not be found.'
@@ -678,8 +744,12 @@ function renderItinerary() {
       const cleanLabel = d.label
         ? d.label.replace(/^\s*Day\s*\d+\s*[—\-–:·]\s*/i, '').trim()
         : ''
-      const tip = cleanLabel ? `${span} · ${cleanLabel}` : span
-      m.bindTooltip(tip, {
+      // Two-part tip so CSS can hide the label half at lower zooms — keeps
+      // the trip readable when zoomed out while preserving detail when in.
+      const tipHtml = cleanLabel
+        ? `<span class="iti-tip-num">${span}</span><span class="iti-tip-label">${cleanLabel}</span>`
+        : `<span class="iti-tip-num">${span}</span>`
+      m.bindTooltip(tipHtml, {
         permanent: true,
         direction: 'right',
         offset: [10, 0],
@@ -809,15 +879,19 @@ function attachLegLabels(days) {
   }
 }
 
-// Tooltips and leg distance labels become unreadable below ~zoom 7 (USA-wide
-// view). Toggle a class on the map root so CSS can hide them while keeping
-// the route polylines + numbered pins visible.
-const ZOOM_DENSITY_THRESHOLD = 7
+// Two-tier label density. Below ZOOM_PINS_ONLY everything is hidden — the
+// route + numbered pins read on their own. Between ZOOM_PINS_ONLY and
+// ZOOM_FULL_LABELS the tooltip shrinks to "Day N" (no place name) and leg
+// distance chips stay hidden. At ZOOM_FULL_LABELS+ it's the full experience.
+const ZOOM_PINS_ONLY = 7
+const ZOOM_FULL_LABELS = 9
 function applyZoomDensity() {
   if (!leaflet) return
   const c = leaflet.getContainer()
   if (!c) return
-  c.classList.toggle('iti-dense', leaflet.getZoom() < ZOOM_DENSITY_THRESHOLD)
+  const z = leaflet.getZoom()
+  c.classList.toggle('iti-dense', z < ZOOM_PINS_ONLY)
+  c.classList.toggle('iti-compact', z >= ZOOM_PINS_ONLY && z < ZOOM_FULL_LABELS)
 }
 watch(drivingLegs, () => {
   if (!leaflet || !mapData.value) return
@@ -920,11 +994,6 @@ async function onFabSearch() {
   activeTab.value = 'places'
   await nextTick()
   document.querySelector('.tab-content input[type="text"], .tab-content input.field')?.focus()
-}
-async function onFabDay() {
-  activeTab.value = 'itinerary'
-  await nextTick()
-  document.querySelector('.tab-content .add-date')?.focus()
 }
 
 function onSelectPoint(p) {
@@ -1371,32 +1440,6 @@ const hasContent = computed(() => {
   return ps.length > 0 || its.length > 0
 })
 
-// One-liner shown under the title: "22 days · T-8d · 2 516 km" — anchors the
-// user in the trip without forcing them to switch to the Itinerary tab.
-const headerSummary = computed(() => {
-  const stats = tripStats.value
-  if (!stats || (stats.days === 0 && stats.points === 0 && stats.trails === 0)) return ''
-  const t = today.value
-  const days = (mapData.value?.itinerary || [])
-    .filter((d) => d.date)
-    .slice()
-    .sort((a, b) => a.date.localeCompare(b.date))
-  const future = days.find((d) => d.date >= t)
-  let countdown = ''
-  if (future) {
-    const diff = Math.round((new Date(future.date) - new Date(t)) / 86400000)
-    if (diff === 0) countdown = 'Today'
-    else if (diff > 0) countdown = `T-${diff}d`
-    else countdown = ''
-  }
-  const bits = []
-  if (stats.days) bits.push(`${stats.days} day${stats.days === 1 ? '' : 's'}`)
-  if (countdown) bits.push(countdown)
-  if (stats.points) bits.push(`${stats.points} pin${stats.points === 1 ? '' : 's'}`)
-  if (stats.trails) bits.push(`${stats.trails} trail${stats.trails === 1 ? '' : 's'}`)
-  return bits.join(' · ')
-})
-
 function collectFitCoords() {
   if (!mapData.value) return []
   const out = []
@@ -1497,14 +1540,6 @@ onBeforeUnmount(() => {
 }
 .head-icon:hover { color: var(--vermillion); border-color: var(--vermillion); }
 
-.head-summary {
-  margin: 0.25rem 0 0;
-  font-size: 0.7rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--ink-faded);
-}
-
 .dock-back {
   display: inline-block;
   font-size: 0.7rem;
@@ -1515,6 +1550,18 @@ onBeforeUnmount(() => {
 }
 .dock-back:hover { color: var(--vermillion); }
 
+.offline-badge {
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vermillion);
+  background: var(--cream);
+  border: 1px dashed var(--vermillion);
+  border-radius: 2px;
+  padding: 0.15rem 0.4rem;
+  cursor: help;
+}
+
 .pins-filter {
   display: flex;
   align-items: center;
@@ -1524,24 +1571,36 @@ onBeforeUnmount(() => {
   border-bottom: 1px dotted var(--cream-edge);
   margin-bottom: 0.4rem;
 }
-.filter-toggle {
-  background: transparent;
-  border: 1px solid var(--ink-faded);
+.filter-eyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--cream-edge);
   border-radius: 999px;
-  padding: 0.2rem 0.7rem;
+  overflow: hidden;
+}
+.seg-btn {
+  background: transparent;
+  border: none;
+  padding: 0.18rem 0.6rem;
   font-family: var(--mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-soft);
   cursor: pointer;
 }
-.filter-toggle:hover { color: var(--ink); border-color: var(--ink); }
-.filter-toggle.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.seg-btn:hover { color: var(--ink); }
+.seg-btn.on { background: var(--ink); color: var(--paper); }
 .filter-meta {
   font-size: 0.66rem;
   letter-spacing: 0.16em;
   color: var(--ink-faded);
+  margin-left: auto;
 }
 
 .locate-link {
@@ -1764,22 +1823,21 @@ onBeforeUnmount(() => {
 }
 .leg-label {
   display: inline-block;
-  background: var(--paper, #faf6ee);
-  color: var(--ink, #1c1c1c);
-  border: 1px solid var(--ink, #1c1c1c);
+  background: rgba(250, 246, 238, 0.92);
+  color: var(--ink-soft, #4a4a4a);
+  border: 1px solid var(--cream-edge, #d8cfc0);
   font-family: var(--mono, ui-monospace, monospace);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   letter-spacing: 0.04em;
-  padding: 0.12rem 0.4rem;
-  border-radius: 3px;
-  box-shadow: 0 2px 0 var(--ink, #1c1c1c);
+  padding: 0.06rem 0.32rem;
+  border-radius: 2px;
   white-space: nowrap;
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
 .leg-label.is-est {
   border-style: dashed;
-  opacity: 0.85;
+  opacity: 0.7;
 }
 
 /* Day-pin label collision: when two permanent tooltips overlap, the later

@@ -84,6 +84,18 @@ export default defineConfig({
               cacheableResponse: { statuses: [200] },
             },
           },
+          {
+            // OSRM routing proxy. SQLite + localStorage already persist hits;
+            // this is the third belt-and-suspenders layer so a fresh device
+            // online once and offline forever still draws roads.
+            urlPattern: /\/api\/route\b/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'routes',
+              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
         ],
       },
     }),

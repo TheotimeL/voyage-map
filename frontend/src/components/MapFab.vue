@@ -2,7 +2,6 @@
   <div class="map-fab-wrap">
     <Transition name="fab-pop">
       <div v-if="open && !armed" class="fab-menu paper" role="menu">
-        <p class="fab-menu-eyebrow mono">Add to map</p>
         <button type="button" class="fab-menu-item" @click="pick('pin')">
           <span class="fab-menu-icon">📍</span>
           <span class="fab-menu-text">
@@ -14,14 +13,7 @@
           <span class="fab-menu-icon">🔎</span>
           <span class="fab-menu-text">
             <strong>Search a place</strong>
-            <em>Find by name in the Pins tab</em>
-          </span>
-        </button>
-        <button type="button" class="fab-menu-item" @click="pick('day')">
-          <span class="fab-menu-icon">🗓</span>
-          <span class="fab-menu-text">
-            <strong>Add a day</strong>
-            <em>Pick a date in the Trip tab</em>
+            <em>Find by name</em>
           </span>
         </button>
       </div>
@@ -40,7 +32,7 @@ const props = defineProps({
   // The popover hides itself in that case so the × on the FAB is unambiguous.
   armed: { type: Boolean, default: false },
 })
-const emit = defineEmits(['drop', 'search', 'day'])
+const emit = defineEmits(['drop', 'search'])
 
 const open = ref(false)
 const armedTitle = computed(() =>
@@ -60,7 +52,6 @@ function pick(kind) {
   open.value = false
   if (kind === 'pin') emit('drop', { cancel: false })
   else if (kind === 'search') emit('search')
-  else if (kind === 'day') emit('day')
 }
 
 // Click-outside to close the menu.

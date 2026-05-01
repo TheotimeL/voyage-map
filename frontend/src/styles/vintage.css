@@ -244,30 +244,35 @@ input[type="range"]::-moz-range-thumb {
 
 /* Itinerary day label tooltip on the map */
 .leaflet-tooltip.iti-tip {
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid var(--ink);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--cream-edge);
   border-radius: 3px;
   color: var(--ink);
   font-family: var(--display);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  padding: 0.15rem 0.45rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
+  padding: 0.1rem 0.4rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   white-space: nowrap;
 }
 .leaflet-tooltip.iti-tip::before { display: none; }
+.iti-tip .iti-tip-num { font-weight: 700; }
+.iti-tip .iti-tip-label { color: var(--ink-soft); margin-left: 0.35rem; }
 [data-theme="dark"] .leaflet-tooltip.iti-tip {
-  background: rgba(20, 23, 26, 0.95);
+  background: rgba(20, 23, 26, 0.92);
   color: var(--ink);
   border-color: var(--cream-edge);
 }
 
-/* Below ~zoom 7 (continental view) the permanent tooltips and per-leg
-   distance chips overlap into illegible soup. Hide them so the route + pins
-   stay readable; they snap back as the user zooms in. */
+/* Tier 1 — continental zoom (< 7): hide all permanent labels. */
 .leaflet-container.iti-dense .leaflet-tooltip.iti-tip,
 .leaflet-container.iti-dense .leg-label-wrap { display: none; }
+
+/* Tier 2 — regional zoom (7–8): tooltips show only "Day N", leg chips hide.
+   Trades full place names for a clean overview that reads at a glance. */
+.leaflet-container.iti-compact .iti-tip .iti-tip-label { display: none; }
+.leaflet-container.iti-compact .leg-label-wrap { display: none; }
 
 /* Today: vermillion fill + concentric pulse so the active stop reads at a glance. */
 .iti-pin-wrapper.is-today .iti-pin {
