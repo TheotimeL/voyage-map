@@ -13,7 +13,7 @@
           <input v-model="form.end_date" type="date" class="field" :min="form.date" required />
         </div>
       </div>
-      <p v-if="spanDays > 1" class="hint mono">{{ spanDays }} nights at this stop</p>
+      <p v-if="spanNights >= 1" class="hint mono">{{ spanNights }} night{{ spanNights === 1 ? '' : 's' }} at this stop</p>
 
       <label class="lbl">Name</label>
       <input v-model="form.label" class="field" maxlength="200" placeholder="e.g. Hôtel Paradiso, Camp Joshua, BLM…" />
@@ -164,9 +164,11 @@ function downscaleToDataUrl(file, maxDim) {
   })
 }
 const hasCoord = computed(() => form.lat != null && form.lng != null)
-const spanDays = computed(() => {
-  if (!form.date || !form.end_date) return 1
-  return Math.max(1, Math.round((new Date(form.end_date) - new Date(form.date)) / 86400000) + 1)
+// Nights at this stop = end - start (no +1). May 9 → May 10 is 1 night,
+// not 2 — the trip-day count and the nights count are different things.
+const spanNights = computed(() => {
+  if (!form.date || !form.end_date) return 0
+  return Math.max(0, Math.round((new Date(form.end_date) - new Date(form.date)) / 86400000))
 })
 // If the user shifts `From` past `Until`, snap `Until` along so the
 // constraint never inverts mid-edit.
@@ -227,7 +229,14 @@ function submit() {
   padding: 1.4rem 1.5rem;
 }
 .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
-.date-cell { display: grid; gap: 0.3rem; }
+.date-cell { display: grid; gap: 0.3rem; min-width: 0; }
+/* Sub-480px viewports (most phones in portrait) couldn't fit two date inputs
+   side-by-side without clipping the calendar icon — collapse to a stacked
+   layout so both pickers stay fully usable. */
+@media (max-width: 480px) {
+  .modal { padding: 1.1rem 1.1rem 1.2rem; }
+  .date-row { grid-template-columns: 1fr; gap: 0.5rem; }
+}
 .lbl {
   font-family: var(--mono);
   font-size: 0.72rem;

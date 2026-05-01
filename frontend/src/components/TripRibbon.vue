@@ -5,7 +5,7 @@
       :key="r.day.id"
       type="button"
       class="rib-stop"
-      :class="{ today: r.isToday, past: r.isPast }"
+      :class="{ today: r.isToday, past: r.isPast, selected: selectedDayId === r.day.id }"
       :title="`${r.dateLine} · ${r.day.label || 'Untitled'}`"
       @click="$emit('go', r.day)"
     >
@@ -22,6 +22,10 @@ import { todayISO } from '@/util.js'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
+  // Day id of the currently focused stop (the one the user just tapped).
+  // Visualised as an outlined chip so the position-in-trip stays anchored
+  // while the map zooms/pans away under the finger.
+  selectedDayId: { type: [Number, String, null], default: null },
 })
 defineEmits(['go'])
 
@@ -31,21 +35,23 @@ const ribEl = ref(null)
 // Center today's chip (or the next future stop, if today is between stops)
 // in the visible ribbon so users don't have to scroll right mid-trip. If
 // every stop is in the future the first chip stays at the left as-is.
-function scrollActiveIntoView() {
+function scrollActiveIntoView(behavior = 'auto') {
   const root = ribEl.value
   if (!root) return
-  const target = root.querySelector('.rib-stop.today')
+  const target = root.querySelector('.rib-stop.selected')
+    || root.querySelector('.rib-stop.today')
     || [...root.querySelectorAll('.rib-stop:not(.past)')][0]
   if (!target) return
   // Don't scroll if the active stop is already the first one — keep the
   // natural left-anchored layout for pre-trip and just-started trips.
   if (target === root.firstElementChild) return
   const left = target.offsetLeft - root.clientWidth / 2 + target.clientWidth / 2
-  root.scrollTo({ left: Math.max(0, left), behavior: 'auto' })
+  root.scrollTo({ left: Math.max(0, left), behavior })
 }
 
-onMounted(() => nextTick(scrollActiveIntoView))
-watch(() => props.days, () => nextTick(scrollActiveIntoView), { deep: true })
+onMounted(() => nextTick(() => scrollActiveIntoView('auto')))
+watch(() => props.days, () => nextTick(() => scrollActiveIntoView('auto')), { deep: true })
+watch(() => props.selectedDayId, () => nextTick(() => scrollActiveIntoView('smooth')))
 
 const rows = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
@@ -131,6 +137,13 @@ function formatChip(iso) {
 }
 .rib-stop.today .rib-num,
 .rib-stop.today .rib-date { color: rgba(255, 255, 255, 0.85); }
+.rib-stop.selected {
+  /* Outlined ink ring rather than a colour swap so the .today red still
+     dominates if the same stop happens to be both today AND selected. */
+  border-color: var(--ink);
+  border-width: 2px;
+  box-shadow: 0 0 0 1px var(--paper) inset;
+}
 .rib-stop.past { opacity: 0.5; }
 .rib-num {
   font-size: 0.6rem;

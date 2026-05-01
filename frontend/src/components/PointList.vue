@@ -22,7 +22,7 @@
               <div class="title">{{ p.title || untitled(p) }}</div>
               <div v-if="p.gpx_data" class="trail-stats mono">
                 <template v-if="trailStats(p)">
-                  {{ trailStats(p).km }} km · D+ {{ trailStats(p).gain }} m
+                  {{ trailStats(p).km }} km<template v-if="trailStats(p).gain != null"> · D+ {{ trailStats(p).gain }} m</template>
                 </template>
               </div>
               <div v-if="p.comment" class="comment">{{ p.comment }}</div>
@@ -95,7 +95,7 @@ function trailStats(p) {
     if (!series.length) { trailMemo.set(p.id, null); return null }
     const km = (series[series.length - 1].dist / 1000).toFixed(1)
     const { gain } = elevationStats(series)
-    const out = { km, gain: Math.round(gain) }
+    const out = { km, gain: gain == null ? null : Math.round(gain) }
     trailMemo.set(p.id, out)
     return out
   } catch {

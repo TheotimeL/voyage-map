@@ -12,7 +12,7 @@
 
     <p v-if="trailStats" class="trail-line mono" :style="point.color ? { '--swatch': point.color } : null">
       <span class="trail-swatch" />
-      <span>{{ trailStats.km }} km · D+ {{ trailStats.gain }} m</span>
+      <span>{{ trailStats.km }} km<template v-if="trailStats.gain != null"> · D+ {{ trailStats.gain }} m</template></span>
     </p>
 
     <p v-if="point.comment" class="comment">{{ point.comment }}</p>
@@ -74,9 +74,10 @@ const trailStats = computed(() => {
     const { coords, elevations } = parseGPX(props.point.gpx_data)
     const series = buildElevationSeries(coords, elevations)
     if (!series.length) return null
+    const { gain } = elevationStats(series)
     return {
       km: (series[series.length - 1].dist / 1000).toFixed(1),
-      gain: Math.round(elevationStats(series).gain),
+      gain: gain == null ? null : Math.round(gain),
     }
   } catch { return null }
 })
@@ -89,9 +90,11 @@ function onDirections() {
 <style scoped>
 .detail {
   position: absolute;
-  /* Zoom controls now live at bottom-right (see MapView.initLeaflet); 5.5rem
-     keeps the card clear of the trip ribbon at the top of .map-wrap. */
-  top: 5.5rem;
+  /* The map-topbar pill (mode toggle + tools, in MapView.vue) sits at top:
+     96px and is roughly 36px tall — its bottom edge is around 132px. We
+     park the detail card just below that so the title doesn't disappear
+     behind the pill on desktop. */
+  top: 9rem;
   right: 1rem;
   width: min(320px, calc(100% - 2rem));
   z-index: 800;

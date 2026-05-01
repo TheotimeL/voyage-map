@@ -7,6 +7,7 @@
     <PlanView
       v-if="mapData"
       v-show="mode === 'plan'"
+      ref="planRef"
       class="plan-pane"
       :title="mapData.title"
       :days="mapData.itinerary || []"
@@ -50,6 +51,7 @@
         v-if="(mapData?.itinerary || []).length"
         class="trip-ribbon"
         :days="mapData.itinerary"
+        :selected-day-id="selectedRibbonDayId"
         @go="onGoDay"
       />
       <div
@@ -105,6 +107,7 @@
 
       <MapFab
         :armed="dropMode"
+        :hidden="!!detail"
         @drop="onFabDrop"
         @search="onFabSearch"
         @add-stop="onFabAddStop"
@@ -137,18 +140,12 @@
         @close="activeTrailPointId = null"
       />
 
-      <!-- Soft-delete toast: anchored bottom-centre on the map. Both pin and
-           day deletes funnel through here so the undo affordance is uniform. -->
-      <Transition name="toast">
-        <div v-if="pendingDelete" class="del-toast" role="status" aria-live="polite">
-          <span class="del-toast-text">{{ pendingDelete.message }}</span>
-          <button type="button" class="del-toast-undo mono" @click="undoDelete">Undo</button>
-        </div>
-      </Transition>
-
       <!-- Top-left: trip identity (editable title + offline badge). Kept thin
-           and discreet so it doesn't compete with the ribbon for attention. -->
-      <div v-if="mapData" class="map-topleft">
+           and discreet so it doesn't compete with the ribbon for attention.
+           On mobile, the trip ribbon already shows the trip identity at the
+           top of the screen, and the title pill collides with the topbar
+           pill on the right — so we hide it whenever the ribbon is present. -->
+      <div v-if="mapData" class="map-topleft" :class="{ 'has-ribbon': hasRibbon }">
         <input
           v-model="titleDraft"
           class="map-topleft-title"
@@ -175,11 +172,24 @@
     </div>
     </div>
 
+    <!-- Soft-delete toast: hoisted out of .map-shell so it stays visible in
+         Plan mode too (the wishlist's × goes through the same scheduler).
+         Both pin and day deletes funnel through here so the undo affordance
+         is uniform. -->
+    <Transition name="toast">
+      <div v-if="pendingDelete" class="del-toast" role="status" aria-live="polite">
+        <span class="del-toast-text">{{ pendingDelete.message }}</span>
+        <button type="button" class="del-toast-undo mono" @click="undoDelete">Undo</button>
+      </div>
+    </Transition>
+
     <!-- Tools popover — shared by both modes. Anchored to the ⋯ button in the
          topbar (Map mode) or in the Plan head-tools slot (Plan mode). Lives
-         outside the map-shell so it floats above either layout. -->
+         outside the map-shell so it floats above either layout. v-show (not
+         v-if) so child state — like SurvivalLayer's selected-kinds set — is
+         retained across open/close cycles. -->
     <Transition name="reveal">
-      <div v-if="toolsOpen && mapData" class="tools-popover paper" @click.stop>
+      <div v-if="mapData" v-show="toolsOpen" class="tools-popover paper" @click.stop>
         <div class="tools-head">
           <p class="eyebrow">Tools</p>
           <button class="tools-close" type="button" @click="toolsOpen = false">×</button>
@@ -275,7 +285,6 @@ import InfoPanel from '@/components/InfoPanel.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import MapFab from '@/components/MapFab.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
-import TrailFinderModal from '@/components/TrailFinderModal.vue'
 import TripRibbon from '@/components/TripRibbon.vue'
 import PlanView from '@/components/PlanView.vue'
 import PasteImportModal from '@/components/PasteImportModal.vue'
@@ -360,7 +369,12 @@ const activeSeries = computed(() => {
   const t = trailPoints.value.find((x) => x.id === activeTrailPointId.value)
   if (!t) return []
   const { coords, elevations } = parseGPX(t.gpx_data)
-  return buildElevationSeries(coords, elevations)
+  const series = buildElevationSeries(coords, elevations)
+  // OSM-derived trails ship without elevation — the elevation profile would
+  // render an empty SVG and bare meta line. Suppress it so the user isn't
+  // greeted by a pointless empty card.
+  if (!series.some((s) => s.ele != null)) return []
+  return series
 })
 const activeTrackName = computed(() => {
   const t = trailPoints.value.find((x) => x.id === activeTrailPointId.value)
@@ -426,7 +440,7 @@ const tripStats = computed(() => {
       const series = buildElevationSeries(coords, elevations)
       if (series.length) {
         trailKm += series[series.length - 1].dist / 1000
-        trailDPlus += elevationStats(series).gain
+        trailDPlus += elevationStats(series).gain || 0
       }
     } catch { /* skip bad GPX */ }
   }
@@ -1202,33 +1216,21 @@ function onFabDrop({ cancel }) {
   detail.value = null
   dropMode.value = true
 }
-async function onFabSearch() {
-  activeTab.value = 'places'
-  await nextTick()
-  document.querySelector('.tab-content input[type="text"], .tab-content input.field')?.focus()
-}
 
-// FAB → "Add a stop": jump to Trip tab and open the inline add-stop disclosure
-// at the suggested next-day date. Faster than the prior 3-tap path.
+// FAB → "Add a stop" / "Search a place": both jump to Plan mode and open
+// the inline add-stop disclosure (which holds both the date input AND the
+// geocoder). The legacy tab-content selectors no longer exist since the
+// dock was removed; we now drive PlanView via a ref + exposed method.
+const planRef = ref(null)
 async function onFabAddStop() {
-  activeTab.value = 'itinerary'
+  setMode('plan')
   await nextTick()
-  // Itinerary auto-opens add when days===0; otherwise we toggle it manually.
-  const btn = document.querySelector('.tab-content .btn-add-day')
-  // Open if currently closed.
-  if (btn && !btn.classList.contains('open')) btn.click()
-  await nextTick()
-  document.querySelector('.tab-content .add-date')?.focus()
+  planRef.value?.openAddRow?.({ focus: 'date' })
 }
-
-// FAB → "Trails near here": find trails around the current map centre. Uses
-// the visible map center because it's the strongest "I'm looking at this
-// area" signal — better than guessing a stop.
-const fabTrailFor = ref(null)
-function onFabFindTrails() {
-  if (!leaflet) return
-  const c = leaflet.getCenter()
-  fabTrailFor.value = { lat: c.lat, lng: c.lng, label: 'this area' }
+async function onFabSearch() {
+  setMode('plan')
+  await nextTick()
+  planRef.value?.openAddRow?.({ focus: 'search' })
 }
 
 function onSelectPoint(p) {
@@ -1671,8 +1673,14 @@ async function onPatchDay(day, payload) {
 
 const candidatesFor = ref(null)
 
+// Day id of the stop the user just tapped from the ribbon (or banner). Drives
+// the outlined-chip "selected" state in TripRibbon so users keep their place
+// on a long trip without staring at the live "today" red.
+const selectedRibbonDayId = ref(null)
+
 async function onGoDay(day) {
   if (!leaflet) return
+  selectedRibbonDayId.value = day?.id ?? null
   if (day.lat != null && day.lng != null) {
     leaflet.flyTo([day.lat, day.lng], Math.max(leaflet.getZoom(), 11), { duration: 0.6 })
     return
@@ -2063,6 +2071,11 @@ onBeforeUnmount(() => {
     padding: 0.25rem 0.5rem;
   }
   .map-topleft-title { width: 11rem; font-size: 0.85rem; }
+  /* When the ribbon is present it carries the trip identity (numbered chips
+     of every stop) — the title pill becomes redundant and visibly collides
+     with the topbar pill on the right, so we hide it. The user can still
+     edit the title from Plan mode. */
+  .map-topleft.has-ribbon { display: none; }
 }
 
 .map-topbar {
@@ -2171,7 +2184,9 @@ onBeforeUnmount(() => {
    the responsive breakpoints can override them in one place. */
 .trip-ribbon {
   position: relative;
-  z-index: 650;
+  /* Above the today-banner (z-index: 700) so even if the banner offset is
+     mis-tuned by a few pixels, the stop pillules win the stacking. */
+  z-index: 760;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 .error { color: var(--vermillion-deep); }
@@ -2381,7 +2396,11 @@ onBeforeUnmount(() => {
 }
 .gpx-hint code { font-family: var(--mono); color: var(--vermillion); padding: 0 2px; }
 
-/* Drop-mode floating hint: pinned just above the FAB. */
+/* Drop-mode floating hint: on desktop it's pinned just left of the FAB so
+   it reads as a tooltip on the action. On mobile the FAB column is more
+   crowded (FAB + locate-me + Leaflet zoom controls at bottom-left) so we
+   surface it as a centred top-of-map pill, well clear of every floating
+   button. */
 .drop-hint {
   position: absolute;
   right: 88px;
@@ -2396,9 +2415,28 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
   animation: drop-hint-pop 200ms ease-out;
 }
+@media (max-width: 720px) {
+  .drop-hint {
+    right: auto;
+    bottom: auto;
+    top: calc(64px + 2.6rem);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.5rem 0.9rem;
+    font-size: 0.74rem;
+    text-align: center;
+    max-width: calc(100% - 2rem);
+  }
+}
 @keyframes drop-hint-pop {
   from { opacity: 0; transform: translateX(8px); }
   to { opacity: 1; transform: translateX(0); }
+}
+@media (max-width: 720px) {
+  @keyframes drop-hint-pop {
+    from { opacity: 0; transform: translate(-50%, -8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
 }
 .link-pick {
   cursor: pointer;
@@ -2585,11 +2623,11 @@ onBeforeUnmount(() => {
    vermillion palette; the Undo button is the click target so users can
    recover without thinking. 5s lifespan, configurable in script. */
 .del-toast {
-  position: absolute;
+  position: fixed;
   bottom: 1.2rem;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 900;
+  z-index: 1000;
   display: inline-flex;
   align-items: stretch;
   background: var(--ink);

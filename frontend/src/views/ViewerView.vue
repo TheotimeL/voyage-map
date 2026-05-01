@@ -52,6 +52,7 @@ import L from 'leaflet'
 import { api } from '@/api.js'
 import { CATEGORIES, parseGPX, trackColor } from '@/util.js'
 import { buildTipNode } from '@/lib/tooltip.js'
+import { routeLeg } from '@/lib/routing.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -166,6 +167,11 @@ function initLeaflet() {
   fitToContent()
 }
 
+// Polylines drawn between consecutive stops — populated lazily as routeLeg
+// resolves OSRM (or falls back to a great-circle estimate). Stored so we
+// can wipe them on re-render without leaving stale arcs behind.
+let routeLines = []
+
 function renderAll() {
   if (!leaflet || !mapData.value) return
   // Day pins (numbered)
@@ -197,6 +203,16 @@ function renderAll() {
     }
     cumulative += span
   }
+  // Trip arc — the most identitarian element of the planner. Without it the
+  // viewer reads as a scatter of pins, missing the "this is a journey"
+  // signal. Each leg uses the cached OSRM geometry when available
+  // (lib/routing.js hydrates from the localStorage cache populated by the
+  // editor); we fall back to a straight-line dashed segment otherwise so
+  // there's always *something* connecting consecutive stops.
+  for (const line of routeLines) leaflet.removeLayer(line)
+  routeLines = []
+  drawRouteArcs(stops)
+
   // Pins + trails — mirror the editor's emoji divIcon so the viewer reads
   // the same as the editor (the default blue droplet was off-aesthetic and
   // hid the pin's category at a glance).
@@ -219,6 +235,38 @@ function renderAll() {
         title: p.title || categoryLabel(p),
       }).addTo(leaflet)
     }
+  }
+}
+
+async function drawRouteArcs(stops) {
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1]
+    // Straight dashed placeholder — replaced by the OSRM geometry as soon
+    // as routeLeg returns. Renders instantly so the arc never "pops in"
+    // late on slow networks.
+    const placeholder = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
+      color: '#5a6470',
+      weight: 2,
+      opacity: 0.55,
+      dashArray: '4 6',
+      lineCap: 'round',
+    }).addTo(leaflet)
+    routeLines.push(placeholder)
+    routeLeg({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng }).then((leg) => {
+      if (!leaflet || !leg?.geometry || leg.source !== 'osrm') return
+      const real = L.polyline(leg.geometry, {
+        color: '#0a4d5b',
+        weight: 3,
+        opacity: 0.8,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(leaflet)
+      routeLines.push(real)
+      // Drop the dashed placeholder once the real road shows up.
+      leaflet.removeLayer(placeholder)
+      const idx = routeLines.indexOf(placeholder)
+      if (idx >= 0) routeLines.splice(idx, 1)
+    }).catch(() => { /* leave the placeholder in place */ })
   }
 }
 
