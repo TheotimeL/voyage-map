@@ -30,16 +30,33 @@
       <p class="eyebrow lbl">Resume a voyage</p>
       <ul class="recents-list">
         <li v-for="r in recents" :key="r.slug" class="recent-card">
-          <router-link :to="{ name: 'map', params: { slug: r.slug } }" class="recent-link">
+          <router-link
+            :to="{ name: 'map', params: { slug: r.slug } }"
+            class="recent-link"
+            :title="`Open /m/${r.slug}`"
+          >
             <span class="recent-title">{{ r.title || 'Untitled voyage' }}</span>
             <span v-if="r.stats" class="recent-stats mono">
               <template v-if="r.stats.days">{{ r.stats.days }} day{{ r.stats.days === 1 ? '' : 's' }} · </template>
               <template v-if="r.stats.trails">{{ r.stats.trails }} trail{{ r.stats.trails === 1 ? '' : 's' }} · </template>
               {{ r.stats.points }} pin{{ r.stats.points === 1 ? '' : 's' }}
             </span>
-            <span class="recent-meta mono">{{ relTime(r.visitedAt) }} · /m/{{ r.slug }}</span>
+            <span class="recent-meta mono">{{ relTime(r.visitedAt) }}</span>
           </router-link>
-          <button class="recent-forget" type="button" :title="`Remove ${r.title || 'voyage'} from this list`" @click="forget(r.slug)">×</button>
+          <button
+            class="recent-action"
+            type="button"
+            :title="`Copy share link for ${r.title || 'voyage'}`"
+            @click="copyLink(r.slug)"
+          >
+            {{ copiedSlug === r.slug ? '✓' : '⧉' }}
+          </button>
+          <button
+            class="recent-forget"
+            type="button"
+            :title="`Remove ${r.title || 'voyage'} from this list`"
+            @click="forget(r.slug)"
+          >×</button>
         </li>
       </ul>
     </section>
@@ -48,6 +65,7 @@
       <label class="eyebrow lbl">01 · Where to?</label>
       <GeocoderSearch
         placeholder="Las Vegas · Mt. Fuji · 11° N 80° W…"
+        :bias="homeBias"
         @pick="onPick"
       />
       <button class="locate-link" type="button" @click="useMyLocation" :disabled="locating">
@@ -84,7 +102,7 @@
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import L from 'leaflet'
 import { api } from '@/api.js'
@@ -104,24 +122,41 @@ const locating = ref(false)
 const locateError = ref('')
 const recents = ref(recentMaps())
 
+// Bias the home search by the most recent voyage's centre — anchors the user
+// in their familiar territory between sessions.
+const homeBias = computed(() => {
+  const r = recents.value[0]
+  if (!r?.lastCenter) return null
+  return { lat: r.lastCenter.lat, lng: r.lastCenter.lng, radiusKm: 1000 }
+})
+
 function relTime(iso) {
   if (!iso) return ''
   const ms = Date.now() - new Date(iso).getTime()
-  const m = Math.floor(ms / 60_000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
+  const min = Math.floor(ms / 60_000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min} min ago`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h} hr ago`
   const d = Math.floor(h / 24)
-  if (d < 7) return `${d}d ago`
+  if (d < 7) return `${d} day${d === 1 ? '' : 's'} ago`
   const w = Math.floor(d / 7)
-  if (w < 5) return `${w}w ago`
+  if (w < 5) return `${w} wk ago`
   return new Date(iso).toLocaleDateString()
 }
 
 function forget(slug) {
   forgetMap(slug)
   recents.value = recentMaps()
+}
+
+const copiedSlug = ref(null)
+async function copyLink(slug) {
+  try {
+    await navigator.clipboard.writeText(`${window.location.origin}/m/${slug}`)
+    copiedSlug.value = slug
+    setTimeout(() => { if (copiedSlug.value === slug) copiedSlug.value = null }, 1400)
+  } catch { /* no clipboard permission */ }
 }
 
 const mapEl = ref(null)
@@ -311,6 +346,7 @@ h1 { margin: 0.5rem 0 1rem; }
 }
 .recent-stats { font-size: 0.72rem; color: var(--ink-soft); letter-spacing: 0.04em; }
 .recent-meta { font-size: 0.7rem; color: var(--ink-faded); letter-spacing: 0.08em; }
+.recent-action,
 .recent-forget {
   background: transparent;
   border: none;
@@ -318,9 +354,13 @@ h1 { margin: 0.5rem 0 1rem; }
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
-  padding: 0 0.6rem;
+  padding: 0 0.55rem;
   border-left: 1px dashed var(--cream-edge);
+  display: grid;
+  place-items: center;
+  min-width: 2rem;
 }
+.recent-action:hover { color: var(--vermillion); background: var(--cream); }
 .recent-forget:hover { color: var(--vermillion); background: var(--cream); }
 
 /* Form ----------------------------------------------------------- */

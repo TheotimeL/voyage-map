@@ -26,7 +26,7 @@
       </template>
 
       <template #places>
-        <GeocoderSearch placeholder="Search a spot to mark…" @pick="onSearchPick" />
+        <GeocoderSearch placeholder="Search a spot to mark…" :bias="searchBias" @pick="onSearchPick" />
         <button class="locate-link" type="button" @click="markMyLocation" :disabled="locating">
           ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
         </button>
@@ -48,7 +48,11 @@
       <template #itinerary>
         <Itinerary
           :days="mapData.itinerary || []"
+          :bias="searchBias"
+          :slug="props.slug"
           @add="onAddDay"
+          @add-bulk="onAddDaysBulk"
+          @add-trail-pin="onAddTrailPin"
           @delete="onDeleteDay"
           @go="onGoDay"
           @edit="(d) => editingDay = d"
@@ -145,6 +149,8 @@
     <ItineraryDayModal
       v-if="editingDay"
       :model-value="editingDay"
+      :bias="searchBias"
+      :existing-pins="pinCandidates"
       @save="(payload) => onPatchDay(editingDay, payload)"
       @locate-candidates="(c) => candidatesFor = c"
       @close="editingDay = null"
@@ -179,7 +185,7 @@ import SunCalc from 'suncalc'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
 import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO } from '@/util.js'
-import { geocode } from '@/api.js'
+import { geocode, categoryFromOSM, reverseGeocode } from '@/api.js'
 import Itinerary from '@/components/Itinerary.vue'
 import PointList from '@/components/PointList.vue'
 import PointFormModal from '@/components/PointFormModal.vue'
@@ -193,7 +199,8 @@ import MoreMenu from '@/components/MoreMenu.vue'
 import MapFab from '@/components/MapFab.vue'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
-import { rememberMap } from '@/lib/recents.js'
+import { rememberMap, updateRecentStats } from '@/lib/recents.js'
+import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
 
 const props = defineProps({
@@ -266,12 +273,33 @@ function haversineKm(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
   return 2 * R * Math.asin(Math.sqrt(h))
 }
+// Driving legs cache (pairKey → { km, minutes, source }). Refreshed lazily as
+// itinerary days change.
+const drivingLegs = ref({})
+function legPairKey(a, b) { return `${a.id}>${b.id}` }
+async function refreshDrivingLegs() {
+  const days = (mapData.value?.itinerary || [])
+    .filter((d) => d.lat != null && d.lng != null)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  for (let i = 0; i < days.length - 1; i++) {
+    const a = days[i], b = days[i + 1]
+    const k = legPairKey(a, b)
+    if (drivingLegs.value[k]) continue
+    const leg = await routeLeg({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng })
+    if (leg) drivingLegs.value = { ...drivingLegs.value, [k]: leg }
+  }
+}
+watch(() => mapData.value?.itinerary, () => refreshDrivingLegs(), { immediate: true, deep: true })
+
 const tripStats = computed(() => {
   if (!mapData.value) return null
   const ps = mapData.value.points || []
-  const trails = ps.filter((p) => p.gpx_data)
+  const trails = ps.filter((p) => p.category === 'trail')
+  // Trail km / D+ rely on GPX. Points pinned via the Trail Finder don't have
+  // GPX, so they count toward `trails` but not toward distance/elevation totals.
+  const trailsWithGPX = trails.filter((p) => p.gpx_data)
   let trailKm = 0, trailDPlus = 0
-  for (const t of trails) {
+  for (const t of trailsWithGPX) {
     try {
       const { coords, elevations } = parseGPX(t.gpx_data)
       const series = buildElevationSeries(coords, elevations)
@@ -281,11 +309,21 @@ const tripStats = computed(() => {
       }
     } catch { /* skip bad GPX */ }
   }
-  const days = (mapData.value.itinerary || [])
-  const located = days.filter((d) => d.lat != null && d.lng != null)
-    .sort((a, b) => a.date.localeCompare(b.date))
-  let driveKm = 0
-  for (let i = 0; i < located.length - 1; i++) driveKm += haversineKm(located[i], located[i + 1])
+  // Match the Itinerary header: walk all days in date order, sum OSRM legs
+  // only (no haversine fallback) so the two displays agree.
+  const days = [...(mapData.value.itinerary || [])].sort((a, b) =>
+    a.date.localeCompare(b.date),
+  )
+  let driveKm = 0, driveMin = 0
+  for (let i = 0; i < days.length - 1; i++) {
+    const a = days[i], b = days[i + 1]
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) continue
+    const leg = drivingLegs.value[legPairKey(a, b)]
+    if (leg) {
+      driveKm += leg.km
+      driveMin += leg.minutes
+    }
+  }
   return {
     points: ps.length - trails.length,
     trails: trails.length,
@@ -293,6 +331,8 @@ const tripStats = computed(() => {
     trailDPlus: Math.round(trailDPlus),
     days: days.length,
     driveKm: Math.round(driveKm),
+    driveMin: driveMin > 0 ? driveMin : null,
+    driveMinFmt: driveMin > 0 ? fmtMinutes(driveMin) : null,
   }
 })
 
@@ -356,6 +396,26 @@ watch(activeId, (next, prev) => {
 
 watch(theme, () => { if (leaflet) attachTiles() })
 
+// Keep the recents stats in sync as the user edits the map. Without this the
+// home page would still report whatever counts existed when the map last
+// loaded (a recurring "0 pins" bug).
+watch(
+  () => mapData.value && [
+    (mapData.value.points || []).length,
+    (mapData.value.points || []).filter((p) => p.category === 'trail').length,
+    (mapData.value.itinerary || []).length,
+  ],
+  (next) => {
+    if (!next || !mapData.value) return
+    const trails = (mapData.value.points || []).filter((p) => p.category === 'trail').length
+    updateRecentStats(props.slug, {
+      points: (mapData.value.points || []).length - trails,
+      trails,
+      days: (mapData.value.itinerary || []).length,
+    })
+  },
+)
+
 function toggleCat(key) {
   const s = new Set(hiddenCats.value)
   if (s.has(key)) s.delete(key)
@@ -386,9 +446,40 @@ let myDotMarker = null
 let myAccuracyCircle = null
 const trackLines = new Map() // track id → L.polyline
 const itineraryMarkers = new Map() // day id → L.marker
-let itineraryLine = null
 const survivalGroup = ref(null)
 function getMapBounds() { return leaflet?.getBounds() }
+
+// Bias passed to geocoder: prefer the visible map area; fall back to the
+// seed center with a generous radius so first-load searches still get results.
+const mapBboxBumper = ref(0) // tick to invalidate searchBias when the map moves
+const searchBias = computed(() => {
+  // Touch the bumper so this re-evaluates on map move.
+  mapBboxBumper.value
+  if (leaflet) {
+    const b = leaflet.getBounds()
+    return { bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] }
+  }
+  if (mapData.value) {
+    return { lat: mapData.value.center_lat, lng: mapData.value.center_lng, radiusKm: 800 }
+  }
+  return null
+})
+
+// "Existing pins" candidates for the day editor and bulk import — non-trail
+// pins, with the category emoji + a short location hint.
+const pinCandidates = computed(() => {
+  if (!mapData.value) return []
+  return (mapData.value.points || [])
+    .filter((p) => !p.gpx_data && p.title)
+    .map((p) => ({
+      id: p.id,
+      lat: p.lat,
+      lng: p.lng,
+      label: p.title,
+      sublabel: `${formatLat(p.lat)} · ${formatLng(p.lng)}`,
+      icon: emojiByCategory[p.category] || '📍',
+    }))
+})
 function renderSurvival(items) {
   if (!leaflet) return
   if (survivalGroup.value) leaflet.removeLayer(survivalGroup.value)
@@ -422,11 +513,16 @@ onMounted(async () => {
     const m = await api.getMap(props.slug)
     mapData.value = m
     titleDraft.value = m.title || ''
-    rememberMap(m.slug, m.title, {
-      points: (m.points || []).filter((p) => !p.gpx_data).length,
-      trails: (m.points || []).filter((p) => p.gpx_data).length,
-      days: (m.itinerary || []).length,
-    })
+    rememberMap(
+      m.slug,
+      m.title,
+      {
+        points: (m.points || []).filter((p) => p.category !== 'trail').length,
+        trails: (m.points || []).filter((p) => p.category === 'trail').length,
+        days: (m.itinerary || []).length,
+      },
+      { lastCenter: { lat: m.center_lat, lng: m.center_lng } },
+    )
     loading.value = false
     await nextTick()
     initLeaflet()
@@ -454,6 +550,13 @@ function initLeaflet() {
   // Initial view: fit to points + itinerary if any, otherwise centre on the map's saved center.
   fitToContent({ initial: true, fallbackCenter: center })
 
+  leaflet.on('moveend', () => { mapBboxBumper.value++ })
+  leaflet.on('zoomend', () => {
+    mapBboxBumper.value++
+    applyZoomDensity()
+  })
+  applyZoomDensity()
+
   leaflet.on('click', (e) => {
     if (dropMode.value) {
       // Place a new pin at the clicked location and exit drop mode.
@@ -479,11 +582,32 @@ function makeItineraryIcon(num, isToday = false) {
   })
 }
 
+// Group consecutive days that share the same coordinates so we render one
+// tooltip per stay (e.g. "Day 1–2 · Excalibur Hotel") instead of stacking
+// duplicates at the exact same point on the map.
+function isSamePoint(a, b) {
+  if (!a || !b) return false
+  return Math.abs(a.lat - b.lat) < 1e-4 && Math.abs(a.lng - b.lng) < 1e-4
+}
+function buildStayGroups(days) {
+  const groups = []
+  for (let i = 0; i < days.length; i++) {
+    const head = groups[groups.length - 1]
+    if (head && isSamePoint(head.day, days[i])) {
+      head.count += 1
+      head.endIdx = i
+    } else {
+      groups.push({ day: days[i], startIdx: i, endIdx: i, count: 1 })
+    }
+  }
+  return groups
+}
+
 function renderItinerary() {
   if (!leaflet) return
   for (const m of itineraryMarkers.values()) leaflet.removeLayer(m)
   itineraryMarkers.clear()
-  if (itineraryLine) { leaflet.removeLayer(itineraryLine); itineraryLine = null }
+  clearLegLines()
 
   const days = (mapData.value?.itinerary || [])
     .filter((d) => d.lat != null && d.lng != null)
@@ -491,16 +615,32 @@ function renderItinerary() {
     .sort((a, b) => a.date.localeCompare(b.date))
 
   const today = todayISO()
-  const coords = []
+  const groups = buildStayGroups(days)
+  const groupHeads = new Set(groups.map((g) => g.startIdx))
+
   days.forEach((d, i) => {
+    const isHead = groupHeads.has(i)
     const m = L.marker([d.lat, d.lng], {
       icon: makeItineraryIcon(i + 1, d.date === today),
       title: `${d.label || 'Day'} — drag to refine, click to focus`,
-      zIndexOffset: 600,
+      // Head sits on top so its tooltip + click handler win over stacked
+      // continuation pins at the same coordinate.
+      zIndexOffset: isHead ? 600 : 500,
       draggable: true,
     }).addTo(leaflet)
-    if (d.label) {
-      m.bindTooltip(d.label, {
+    if (isHead) {
+      const group = groups.find((g) => g.startIdx === i)
+      const span = group.count > 1
+        ? `Day ${i + 1}–${i + group.count}`
+        : `Day ${i + 1}`
+      // Strip a leading "Day N — " / "Day N - " from the saved label so we
+      // don't end up with "Day 1 · Day 1 — Vegas" when the label already
+      // names the day itself.
+      const cleanLabel = d.label
+        ? d.label.replace(/^\s*Day\s*\d+\s*[—\-–:·]\s*/i, '').trim()
+        : ''
+      const tip = cleanLabel ? `${span} · ${cleanLabel}` : span
+      m.bindTooltip(tip, {
         permanent: true,
         direction: 'right',
         offset: [10, 0],
@@ -523,20 +663,100 @@ function renderItinerary() {
       }
     })
     itineraryMarkers.set(d.id, m)
-    coords.push([d.lat, d.lng])
   })
 
-  if (coords.length >= 2) {
-    itineraryLine = L.polyline(coords, {
+  attachLegLines(days)
+  attachLegLabels(days)
+  applyZoomDensity()
+}
+
+// Per-leg polylines — uses the real OSRM road geometry when available,
+// otherwise falls back to a dashed straight segment so the user sees the
+// trip take shape immediately while routes resolve in the background.
+const legLineMarkers = new Map() // pairKey → L.polyline
+function clearLegLines() {
+  for (const line of legLineMarkers.values()) {
+    if (leaflet) leaflet.removeLayer(line)
+  }
+  legLineMarkers.clear()
+}
+function attachLegLines(days) {
+  if (!leaflet || days.length < 2) return
+  for (let i = 0; i < days.length - 1; i++) {
+    const a = days[i], b = days[i + 1]
+    const k = legPairKey(a, b)
+    const leg = drivingLegs.value[k]
+    const hasGeom = leg?.geometry && leg.geometry.length > 1
+    const path = hasGeom ? leg.geometry : [[a.lat, a.lng], [b.lat, b.lng]]
+    const line = L.polyline(path, {
       color: '#1f3851',
-      weight: 2.5,
-      opacity: 0.9,
-      dashArray: '4 8',
+      weight: hasGeom ? 3 : 2.5,
+      opacity: hasGeom ? 0.85 : 0.7,
+      dashArray: hasGeom ? null : '4 8',
       lineCap: 'round',
+      lineJoin: 'round',
       interactive: false,
     }).addTo(leaflet)
+    legLineMarkers.set(k, line)
   }
 }
+
+// Per-segment leg labels (e.g. "4h 30 · 425 km") shown at the polyline
+// midpoint. Re-rendered whenever days change or driving legs resolve.
+const legLabelMarkers = []
+function clearLegLabels() {
+  while (legLabelMarkers.length) {
+    const m = legLabelMarkers.pop()
+    if (leaflet) leaflet.removeLayer(m)
+  }
+}
+function attachLegLabels(days) {
+  clearLegLabels()
+  if (!leaflet || days.length < 2) return
+  for (let i = 0; i < days.length - 1; i++) {
+    const a = days[i], b = days[i + 1]
+    const leg = drivingLegs.value[legPairKey(a, b)]
+    if (!leg) continue
+    // Same-location stays produce 0-km / 0-min legs that just clutter the map.
+    if (leg.km < 1) continue
+    const midLat = (a.lat + b.lat) / 2
+    const midLng = (a.lng + b.lng) / 2
+    const text = `${fmtMinutes(leg.minutes)} · ${leg.km} km`
+    const m = L.marker([midLat, midLng], {
+      icon: L.divIcon({
+        className: 'leg-label-wrap',
+        html: `<div class="leg-label${leg.source === 'estimate' ? ' is-est' : ''}">${text}</div>`,
+        iconSize: null,
+      }),
+      interactive: false,
+      zIndexOffset: 400,
+    }).addTo(leaflet)
+    legLabelMarkers.push(m)
+  }
+}
+
+// Tooltips and leg distance labels become unreadable below ~zoom 7 (USA-wide
+// view). Toggle a class on the map root so CSS can hide them while keeping
+// the route polylines + numbered pins visible.
+const ZOOM_DENSITY_THRESHOLD = 7
+function applyZoomDensity() {
+  if (!leaflet) return
+  const c = leaflet.getContainer()
+  if (!c) return
+  c.classList.toggle('iti-dense', leaflet.getZoom() < ZOOM_DENSITY_THRESHOLD)
+}
+watch(drivingLegs, () => {
+  if (!leaflet || !mapData.value) return
+  const days = (mapData.value.itinerary || [])
+    .filter((d) => d.lat != null && d.lng != null)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+  // Re-paint the polylines so resolved legs swap from dashed straight to the
+  // real road geometry, then re-attach the duration labels.
+  clearLegLines()
+  attachLegLines(days)
+  attachLegLabels(days)
+}, { deep: true })
 
 function makePinIcon(glyph, extra = '') {
   return L.divIcon({
@@ -732,6 +952,23 @@ function attachSun(banner) {
   return { ...banner, sun: { rise: fmtHMatLng(t.sunrise, lng), set: fmtHMatLng(t.sunset, lng) } }
 }
 
+// Reverse-geocoded fallback names per day id, populated on demand for days
+// that have coords but no user-given label.
+const dayPlaceNames = ref({})
+async function ensurePlaceName(day) {
+  if (!day || day.lat == null || day.lng == null) return
+  if (day.label) return
+  if (dayPlaceNames.value[day.id]) return
+  const name = await reverseGeocode(day.lat, day.lng)
+  if (name) dayPlaceNames.value = { ...dayPlaceNames.value, [day.id]: name }
+}
+
+function bannerNameFor(day) {
+  if (!day) return 'Untitled'
+  if (day.label) return day.label
+  return dayPlaceNames.value[day.id] || 'On the road'
+}
+
 const todayBanner = computed(() => {
   const days = mapData.value?.itinerary || []
   if (!days.length) return null
@@ -742,7 +979,7 @@ const todayBanner = computed(() => {
     const idx = sorted.indexOf(todayDay)
     return attachSun({
       tag: `Day ${idx + 1} / ${sorted.length}`,
-      text: (todayDay.label || 'On the road').toUpperCase(),
+      text: bannerNameFor(todayDay).toUpperCase(),
       notes: todayDay.notes || null,
       day: todayDay,
     })
@@ -754,13 +991,15 @@ const todayBanner = computed(() => {
     const tag = days >= 1 ? `T-${days}d` : `T-<1d`
     return attachSun({
       tag,
-      text: `Next: ${(future.label || 'Untitled').toUpperCase()}`,
+      text: `Next: ${bannerNameFor(future).toUpperCase()}`,
       notes: future.notes || null,
       day: future,
     })
   }
   return null
 })
+
+watch(() => todayBanner.value?.day, (d) => { ensurePlaceName(d) }, { immediate: true })
 
 // Forecast for today's banner — populated lazily on day change.
 const bannerWx = ref(null)
@@ -778,6 +1017,46 @@ async function onAddDay(payload) {
     const day = await api.addItineraryDay(props.slug, payload)
     if (!mapData.value.itinerary) mapData.value.itinerary = []
     mapData.value.itinerary = [...mapData.value.itinerary, day].sort((a, b) => a.date.localeCompare(b.date))
+  } catch (e) { error.value = e.message }
+}
+
+async function onAddTrailPin(t) {
+  // Trails returned by Overpass have no GPX, so we create a regular Trail-
+  // category pin and let the user attach a GPX later. Title follows the OSM
+  // route name; comment captures any sac_scale/distance context.
+  try {
+    const bits = []
+    if (t.kind) bits.push(t.kind)
+    if (t.sac) bits.push(`SAC ${t.sac}`)
+    if (t.distance) bits.push(`${t.distance} km`)
+    if (t.ref) bits.push(t.ref)
+    const created = await api.addPoint(props.slug, {
+      lat: t.lat,
+      lng: t.lng,
+      title: t.name,
+      category: 'trail',
+      comment: bits.length ? bits.join(' · ') : null,
+    })
+    mapData.value.points.push(created)
+    addPointMarker(created)
+    activeId.value = created.id
+    detail.value = { ...created }
+    if (leaflet) leaflet.flyTo([t.lat, t.lng], 13, { duration: 0.5 })
+  } catch (e) { error.value = e.message }
+}
+
+async function onAddDaysBulk(payload) {
+  // Tolerate the legacy bare-rows signature.
+  const rows = Array.isArray(payload) ? payload : payload?.rows
+  const replace = Array.isArray(payload) ? false : !!payload?.replace
+  if (!rows?.length) return
+  try {
+    const created = await api.addItineraryDaysBulk(props.slug, rows, { replace })
+    if (!mapData.value.itinerary || replace) mapData.value.itinerary = []
+    mapData.value.itinerary = [...mapData.value.itinerary, ...created].sort((a, b) => a.date.localeCompare(b.date))
+    // Re-fit the map so the user sees their newly imported trip.
+    await nextTick()
+    fitToContent()
   } catch (e) { error.value = e.message }
 }
 
@@ -905,7 +1184,7 @@ async function markMyLocation() {
 
 function onSearchPick(r) {
   // Picking a search result opens the new-point modal at that location, pre-titled.
-  const name = r.label.split(',')[0]
+  const name = r.kind === 'local' ? r.label : r.label.split(',')[0]
   if (leaflet) leaflet.flyTo([r.lat, r.lng], 14, { duration: 0.5 })
   detail.value = null
   activeId.value = null
@@ -914,7 +1193,7 @@ function onSearchPick(r) {
     lng: r.lng,
     title: name,
     comment: '',
-    category: 'note',
+    category: categoryFromOSM(r.osmClass, r.osmType) || 'note',
   }
 }
 
@@ -1279,4 +1558,31 @@ onBeforeUnmount(() => {
 .cand-coord { font-size: 0.72rem; color: var(--ink-soft); }
 .row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.4rem; }
 
+</style>
+
+<style>
+/* Leaflet divIcons aren't scoped — keep this rule global. */
+.leg-label-wrap {
+  background: transparent !important;
+  border: none !important;
+}
+.leg-label {
+  display: inline-block;
+  background: var(--paper, #faf6ee);
+  color: var(--ink, #1c1c1c);
+  border: 1px solid var(--ink, #1c1c1c);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.4rem;
+  border-radius: 3px;
+  box-shadow: 0 2px 0 var(--ink, #1c1c1c);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.leg-label.is-est {
+  border-style: dashed;
+  opacity: 0.85;
+}
 </style>

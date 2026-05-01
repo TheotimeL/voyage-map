@@ -11,7 +11,9 @@
 
       <label class="lbl">Location</label>
       <GeocoderSearch
-        :placeholder="hasCoord ? 'Change the location…' : 'Search a place…'"
+        :placeholder="hasCoord ? 'Change the location…' : 'Search a place — your existing pins show first'"
+        :bias="bias"
+        :local-candidates="existingPins"
         @pick="onPick"
       />
       <div v-if="hasCoord" class="coord-readout">
@@ -48,6 +50,8 @@ import GeocoderSearch from './GeocoderSearch.vue'
 
 const props = defineProps({
   modelValue: { type: Object, required: true },
+  bias: { type: Object, default: null },
+  existingPins: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['save', 'close'])
 

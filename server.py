@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.geocode import router as geocode_router
 from api.itinerary import router as itinerary_router
 from api.maps import router as maps_router
 from api.overpass import router as overpass_router
@@ -52,6 +53,7 @@ app.include_router(maps_router, prefix="/api")
 app.include_router(points_router, prefix="/api")
 app.include_router(itinerary_router, prefix="/api")
 app.include_router(overpass_router, prefix="/api")
+app.include_router(geocode_router, prefix="/api")
 
 
 @app.get("/api/health")

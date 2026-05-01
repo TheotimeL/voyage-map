@@ -28,8 +28,15 @@ def add_day(slug: str, payload: ItineraryDayIn, db: Session = Depends(get_db)):
 
 
 @router.post("/bulk", response_model=list[ItineraryDayOut], status_code=201)
-def add_days_bulk(slug: str, payload: list[ItineraryDayIn], db: Session = Depends(get_db)):
+def add_days_bulk(
+    slug: str,
+    payload: list[ItineraryDayIn],
+    replace: bool = False,
+    db: Session = Depends(get_db),
+):
     m = _get_map_or_404(db, slug)
+    if replace:
+        db.query(ItineraryDay).filter(ItineraryDay.map_id == m.id).delete()
     rows = [ItineraryDay(map_id=m.id, **p.model_dump()) for p in payload]
     db.add_all(rows)
     db.commit()

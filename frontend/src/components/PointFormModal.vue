@@ -16,6 +16,17 @@
       />
 
       <label class="lbl">Notes</label>
+      <div v-if="showFlagChips" class="flag-chips">
+        <button
+          v-for="f in FLAG_CHIPS"
+          :key="f.key"
+          type="button"
+          class="flag-chip"
+          :class="{ on: hasFlag(f.key) }"
+          :title="f.title"
+          @click="toggleFlag(f.key)"
+        >{{ f.label }}</button>
+      </div>
       <textarea
         v-model="form.comment"
         class="field"
@@ -47,8 +58,20 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
+import { computed, reactive, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { CATEGORIES, formatLat, formatLng } from '@/util.js'
+
+// Vanlife/trip shorthand chips that prepend to the comment as `[FLAG] …`.
+// Limited set so the field stays scannable.
+const FLAG_CHIPS = [
+  { key: 'BLM',         label: 'BLM',         title: 'Free dispersed camping on Bureau of Land Management land' },
+  { key: 'Free',        label: 'Free',        title: 'No fee' },
+  { key: 'Paid',        label: 'Paid',        title: 'Has a nightly fee' },
+  { key: 'Electricity', label: 'Electricity', title: 'Powered hookup available' },
+  { key: 'Water',       label: 'Water',       title: 'Potable water on site' },
+  { key: 'Reserved',    label: 'Reserved',    title: 'Booking confirmed' },
+]
+const FLAG_KEYS = new Set(FLAG_CHIPS.map((f) => f.key))
 
 const props = defineProps({
   modelValue: { type: Object, required: true },
@@ -63,6 +86,33 @@ const form = reactive({
   comment: props.modelValue.comment || '',
   category: props.modelValue.category || 'note',
 })
+
+// Flag chips only make sense for sleep/camp categories — they're driven by
+// the spreadsheet's "BLM"/"ELECTRICITE" notes so the user can tap them on
+// instead of typing.
+const showFlagChips = computed(() => ['camp', 'stay'].includes(form.category))
+
+// Flags live as a `[FLAG_A, FLAG_B] …` prefix in the comment. We keep the
+// rest of the note untouched, even when the user types around the prefix.
+const flagPrefixRe = /^\s*\[([^\]]+)\]\s*/
+function readFlags(text) {
+  const m = flagPrefixRe.exec(text || '')
+  if (!m) return new Set()
+  return new Set(m[1].split(',').map((s) => s.trim()).filter((k) => FLAG_KEYS.has(k)))
+}
+function writeFlags(text, flags) {
+  const stripped = (text || '').replace(flagPrefixRe, '').trimStart()
+  if (!flags.size) return stripped
+  const ordered = FLAG_CHIPS.map((f) => f.key).filter((k) => flags.has(k))
+  return `[${ordered.join(', ')}]${stripped ? ' ' + stripped : ''}`
+}
+function hasFlag(k) { return readFlags(form.comment).has(k) }
+function toggleFlag(k) {
+  const next = readFlags(form.comment)
+  if (next.has(k)) next.delete(k)
+  else next.add(k)
+  form.comment = writeFlags(form.comment, next)
+}
 
 const titleInput = useTemplateRef('titleInput')
 onMounted(() => titleInput.value?.focus())
@@ -128,5 +178,29 @@ function submit() {
   justify-content: flex-end;
   margin-top: 0.6rem;
   flex-wrap: wrap;
+}
+.flag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: -0.3rem 0 0.4rem;
+}
+.flag-chip {
+  background: transparent;
+  border: 1px dashed var(--cream-edge);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.flag-chip:hover { border-color: var(--ink); color: var(--ink); border-style: solid; }
+.flag-chip.on {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+  border-style: solid;
 }
 </style>

@@ -8,7 +8,8 @@
         <li v-if="stats.trailKm > 0"><span class="stat-num">{{ stats.trailKm }}</span><span class="stat-lbl">trail km</span></li>
         <li v-if="stats.trailDPlus > 0"><span class="stat-num">{{ stats.trailDPlus.toLocaleString() }}</span><span class="stat-lbl">D+ m</span></li>
         <li><span class="stat-num">{{ stats.days }}</span><span class="stat-lbl">days</span></li>
-        <li v-if="stats.driveKm > 0"><span class="stat-num">≈{{ stats.driveKm.toLocaleString() }}</span><span class="stat-lbl">trip km</span></li>
+        <li v-if="stats.driveKm > 0"><span class="stat-num">{{ stats.driveKm.toLocaleString() }}</span><span class="stat-lbl">drive km</span></li>
+        <li v-if="stats.driveMinFmt"><span class="stat-num">{{ stats.driveMinFmt }}</span><span class="stat-lbl">drive time</span></li>
       </ul>
     </section>
 
@@ -18,10 +19,8 @@
     </section>
 
     <section class="more-block">
-      <div class="more-row">
-        <h4 class="more-title">Water · WC · Trash</h4>
-        <SurvivalLayer :get-bounds="getBounds" @render="(v) => emit('render-survival', v)" @clear="emit('clear-survival')" />
-      </div>
+      <h4 class="more-title">Water · Dump · WC · Trash · Shower</h4>
+      <SurvivalLayer :get-bounds="getBounds" @render="(v) => emit('render-survival', v)" @clear="emit('clear-survival')" />
     </section>
 
     <section class="more-block">

@@ -1,14 +1,16 @@
 <template>
   <section class="iti">
-    <div v-if="todayDay" class="iti-head">
-      <button class="btn btn-tiny" type="button" @click="goToday">Today →</button>
+    <div class="iti-head">
+      <button v-if="todayDay" class="btn btn-tiny" type="button" @click="goToday">Today →</button>
+      <button class="btn btn-tiny btn-paste" type="button" @click="showPaste = true" title="Bulk import dates from a spreadsheet">Paste schedule…</button>
     </div>
 
     <p v-if="days.length" class="iti-meta mono">
       {{ days.length }} {{ days.length === 1 ? 'day' : 'days' }}
       <template v-if="todayIdx >= 0"> · Day {{ todayIdx + 1 }} / {{ days.length }}</template>
       <template v-else-if="firstFutureIdx >= 0"> · {{ daysUntil(days[firstFutureIdx].date) }}</template>
-      <template v-if="totalKm > 0"> · ≈ {{ totalKm.toLocaleString() }} km</template>
+      <template v-if="totalDriveKm > 0"> · {{ totalDriveKm.toLocaleString() }} km · {{ fmtMinutes(totalDriveMin) }} drive</template>
+      <template v-else-if="totalKm > 0"> · ≈ {{ totalKm.toLocaleString() }} km</template>
     </p>
 
     <ol v-if="days.length" class="iti-list">
@@ -32,9 +34,19 @@
               {{ forecastFor(d).tMax }}° / {{ forecastFor(d).tMin }}°
               <template v-if="forecastFor(d).precip > 0.5"> · {{ forecastFor(d).precip.toFixed(1) }}mm</template>
             </p>
+            <p v-else-if="weatherTooFar(d)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days — checks back from ${weatherStartDate}`">
+              · forecast in {{ weatherTooFar(d) }}d
+            </p>
             <p v-if="d.notes" class="iti-notes">{{ d.notes }}</p>
           </div>
           <div class="iti-actions">
+            <button
+              v-if="d.lat != null && d.lng != null"
+              class="iti-icon"
+              type="button"
+              :title="`Find trails near ${d.label || 'this day'}`"
+              @click="trailFor = d"
+            >🥾</button>
             <button class="iti-icon" type="button" :title="`Edit day ${i + 1}`" @click="$emit('edit', d)">✎</button>
             <button class="iti-icon" type="button" :title="`Remove day ${i + 1}`" @click="del(d)">×</button>
           </div>
@@ -42,9 +54,15 @@
         <div
           v-if="i < days.length - 1 && legKm(d, days[i + 1]) != null"
           class="iti-leg mono"
-          :title="`Straight-line distance from ${d.label || 'this day'} to ${days[i + 1].label || 'the next day'} — actual driving will be longer.`"
+          :title="legTitle(d, days[i + 1])"
         >
-          ↓ ≈ {{ legKm(d, days[i + 1]) }} km
+          <template v-if="legFor(d, days[i + 1])">
+            ↓ {{ legFor(d, days[i + 1]).km.toLocaleString() }} km · {{ fmtMinutes(legFor(d, days[i + 1]).minutes) }}
+            <span v-if="legFor(d, days[i + 1]).source === 'estimate'" class="leg-est">est</span>
+          </template>
+          <template v-else>
+            ↓ ≈ {{ legKm(d, days[i + 1]) }} km
+          </template>
         </div>
       </template>
     </ol>
@@ -56,8 +74,29 @@
         <input v-model="form.date" type="date" class="field add-date" :min="firstISO" required />
         <button class="btn btn-add" type="submit" title="Add an empty day with no location">+ Day</button>
       </form>
-      <GeocoderSearch placeholder="…or search a place to drop on this day" @pick="onAddPick" />
+      <GeocoderSearch
+        placeholder="…or search a place to drop on this day"
+        :bias="bias"
+        @pick="onAddPick"
+      />
     </section>
+
+    <PasteImportModal
+      v-if="showPaste"
+      :default-year="defaultYear"
+      :bias="bias"
+      @close="showPaste = false"
+      @import="onPasteImport"
+    />
+
+    <TrailFinderModal
+      v-if="trailFor"
+      :lat="trailFor.lat"
+      :lng="trailFor.lng"
+      :name="trailFor.label || 'this day'"
+      @close="trailFor = null"
+      @pick="onTrailPick"
+    />
   </section>
 </template>
 
@@ -66,11 +105,36 @@ import { computed, reactive, ref, watch } from 'vue'
 import { todayISO } from '@/util.js'
 import { dailyForecast, glyphFor } from '@/lib/weather.js'
 import GeocoderSearch from './GeocoderSearch.vue'
+import PasteImportModal from './PasteImportModal.vue'
+import TrailFinderModal from './TrailFinderModal.vue'
+import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
+  bias: { type: Object, default: null },
+  slug: { type: String, default: null },
 })
-const emit = defineEmits(['add', 'delete', 'go', 'edit'])
+const emit = defineEmits(['add', 'add-bulk', 'add-trail-pin', 'delete', 'go', 'edit'])
+
+const showPaste = ref(false)
+const defaultYear = computed(() => {
+  if (props.days.length) return parseInt(props.days[0].date.slice(0, 4), 10)
+  return new Date().getFullYear()
+})
+
+function onPasteImport(payload) {
+  showPaste.value = false
+  // Tolerate the legacy bare-rows signature too.
+  const rows = Array.isArray(payload) ? payload : payload?.rows
+  const replace = Array.isArray(payload) ? false : !!payload?.replace
+  if (rows && rows.length) emit('add-bulk', { rows, replace })
+}
+
+const trailFor = ref(null)
+function onTrailPick(t) {
+  trailFor.value = null
+  emit('add-trail-pin', t)
+}
 
 const today = computed(() => todayISO())
 
@@ -91,6 +155,14 @@ const suggestedNewDate = computed(() => {
 // fetches resolve.
 const wxMap = ref({})
 function forecastFor(d) { return wxMap.value[d.id] || null }
+const FORECAST_HORIZON_DAYS = 16
+const weatherStartDate = today.value
+function weatherTooFar(d) {
+  if (!d.date) return 0
+  const ms = new Date(d.date).getTime() - new Date(today.value).getTime()
+  const days = Math.ceil(ms / (24 * 3600 * 1000))
+  return days > FORECAST_HORIZON_DAYS ? days - FORECAST_HORIZON_DAYS : 0
+}
 async function refreshWeather(days) {
   for (const d of days) {
     if (d.id == null || d.lat == null || d.lng == null) continue
@@ -119,6 +191,50 @@ const totalKm = computed(() => {
   for (let i = 0; i < sorted.length - 1; i++) {
     const km = legKm(sorted[i], sorted[i + 1])
     if (km != null) sum += km
+  }
+  return sum
+})
+
+// Real driving legs (cached). Loaded async; null until first resolution.
+const legCache = ref({}) // pairKey → { km, minutes, source }
+function pairKey(a, b) { return `${a.id}>${b.id}` }
+function legFor(a, b) { return legCache.value[pairKey(a, b)] || null }
+function legTitle(a, b) {
+  const leg = legFor(a, b)
+  if (leg) {
+    const tag = leg.source === 'osrm' ? 'driving' : 'estimate (no OSRM)'
+    return `${tag}: ${leg.km} km · ${fmtMinutes(leg.minutes)}`
+  }
+  return `Straight-line distance from ${a.label || 'this day'} to ${b.label || 'the next day'} — actual driving will be longer.`
+}
+async function refreshLegs(days) {
+  const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date))
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i], b = sorted[i + 1]
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) continue
+    const k = pairKey(a, b)
+    if (legCache.value[k]) continue
+    const leg = await routeLeg({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng })
+    if (leg) legCache.value = { ...legCache.value, [k]: leg }
+  }
+}
+watch(() => props.days, (next) => { refreshLegs(next || []) }, { immediate: true })
+
+const totalDriveKm = computed(() => {
+  const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  let sum = 0
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const leg = legFor(sorted[i], sorted[i + 1])
+    if (leg) sum += leg.km
+  }
+  return sum
+})
+const totalDriveMin = computed(() => {
+  const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
+  let sum = 0
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const leg = legFor(sorted[i], sorted[i + 1])
+    if (leg) sum += leg.minutes
   }
   return sum
 })
@@ -192,6 +308,19 @@ function legKm(a, b) {
   align-items: center;
   gap: 0.35rem;
   margin-top: -0.1rem;
+  flex-wrap: wrap;
+}
+.btn-paste {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px dashed var(--ink);
+  box-shadow: none;
+}
+.btn-paste:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+  border-style: solid;
 }
 .iti-meta {
   margin: 0;
@@ -289,6 +418,19 @@ function legKm(a, b) {
   color: var(--ink-faded);
   letter-spacing: 0.14em;
   padding: 0.15rem 0 0.15rem 2.6rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.leg-est {
+  font-size: 0.55rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  background: var(--cream);
+  padding: 0 0.3rem;
+  border-radius: 2px;
+  border: 1px dotted var(--cream-edge);
 }
 
 .iti-wx {
@@ -297,6 +439,7 @@ function legKm(a, b) {
   color: var(--ink-soft);
   letter-spacing: 0.04em;
 }
+.iti-wx.is-faded { color: var(--ink-faded); font-style: italic; }
 
 .add-block {
   margin-top: 1rem;

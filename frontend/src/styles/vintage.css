@@ -263,6 +263,12 @@ input[type="range"]::-moz-range-thumb {
   border-color: var(--cream-edge);
 }
 
+/* Below ~zoom 7 (continental view) the permanent tooltips and per-leg
+   distance chips overlap into illegible soup. Hide them so the route + pins
+   stay readable; they snap back as the user zooms in. */
+.leaflet-container.iti-dense .leaflet-tooltip.iti-tip,
+.leaflet-container.iti-dense .leg-label-wrap { display: none; }
+
 /* Today: vermillion fill + concentric pulse so the active stop reads at a glance. */
 .iti-pin-wrapper.is-today .iti-pin {
   background: var(--vermillion);

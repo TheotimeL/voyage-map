@@ -64,13 +64,14 @@ export default defineConfig({
             options: { cacheName: 'google-fonts-styles' },
           },
           {
-            // Nominatim geocoding — cache successful queries so locating works offline if user already searched once.
-            urlPattern: /^https:\/\/nominatim\.openstreetmap\.org\/.*$/,
+            // Geocoding via our backend proxy — cache so a previously-searched
+            // place still resolves when offline.
+            urlPattern: /\/api\/(geocode|reverse)\b/,
             handler: 'StaleWhileRevalidate',
             options: {
-              cacheName: 'nominatim',
+              cacheName: 'geocode',
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
