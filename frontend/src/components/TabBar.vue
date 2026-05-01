@@ -45,10 +45,18 @@ defineEmits(['update:active'])
   font-size: 0.92rem;
   color: var(--ink-faded);
   cursor: pointer;
+  min-height: 44px;
   transition: color 90ms ease, border-color 90ms ease;
 }
 .tab:hover { color: var(--ink); }
 .tab.active { color: var(--vermillion); border-bottom-color: var(--vermillion); }
 .tab-icon { font-size: 1.05rem; }
 .tab-label { font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+@media (max-width: 720px) {
+  /* Mobile sheet: bigger labels and a 48-px tap target make the bottom
+     tab bar feel less like a footer and more like the navigation it is. */
+  .tab { padding: 0.85rem 0.4rem; min-height: 48px; }
+  .tab-icon { font-size: 1.2rem; }
+  .tab-label { font-size: 0.88rem; }
+}
 </style>
