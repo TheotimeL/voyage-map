@@ -111,14 +111,16 @@
         <div
           v-if="legShouldShow(r)"
           class="iti-leg mono"
+          :class="{ 'is-long': legIsLong(r) }"
           :title="r.legNext.title"
         >
           <template v-if="r.legNext.real">
-            ↓ {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
+            <span class="leg-glyph" aria-hidden="true">{{ legIsLong(r) ? '~' : '↓' }}</span>
+            {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
             <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
           </template>
           <template v-else>
-            ↓ ≈ {{ r.legNext.km }} km
+            <span class="leg-glyph" aria-hidden="true">↓</span> ≈ {{ r.legNext.km }} km
           </template>
         </div>
       </template>
@@ -447,6 +449,17 @@ function legShouldShow(row) {
   return true
 }
 
+// "Long-haul" legs (>= 3 hours OR >= 250 km) get a quieter typographic bump
+// — heavier weight + a route-style ~ glyph + more vertical breathing — so
+// the trip reads as "stop · drive · stop · drive" instead of one flat list.
+const LONG_LEG_MIN = 180
+const LONG_LEG_KM = 250
+function legIsLong(row) {
+  const real = row?.legNext?.real
+  if (!real) return false
+  return real.minutes >= LONG_LEG_MIN || real.km >= LONG_LEG_KM
+}
+
 function legKm(a, b) {
   if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null
   const R = 6371
@@ -661,6 +674,35 @@ function legKm(a, b) {
   display: inline-flex;
   align-items: baseline;
   gap: 0.4rem;
+}
+.iti-leg .leg-glyph {
+  display: inline-block;
+  width: 0.85rem;
+  text-align: center;
+  color: var(--ink-faded);
+}
+/* Long-haul drive day: a quiet emphasis, not a heading. Slightly heavier
+   text, more vertical room, and a dashed rule above so the eye reads the
+   trip as alternating "stop · drive". */
+.iti-leg.is-long {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+  padding: 0.45rem 0 0.5rem 2.6rem;
+  position: relative;
+}
+.iti-leg.is-long::before {
+  content: "";
+  position: absolute;
+  left: 2.6rem;
+  right: 0.4rem;
+  top: 0.18rem;
+  border-top: 1px dashed var(--cream-edge);
+}
+.iti-leg.is-long .leg-glyph {
+  font-family: var(--display);
+  color: var(--ink-soft);
+  font-weight: 700;
 }
 
 /* Attached pins displayed inline under a day card. */
