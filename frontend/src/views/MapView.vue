@@ -126,7 +126,11 @@
         :days="mapData.itinerary"
         @go="onGoDay"
       />
-      <div v-if="todayBanner && !bannerDismissed" class="today-banner" :class="{ 'is-live': todayBanner.live, 'is-future': !todayBanner.live }">
+      <div
+        v-if="todayBanner && !bannerDismissed"
+        class="today-banner"
+        :class="{ 'is-live': todayBanner.live, 'is-future': !todayBanner.live, 'with-ribbon': hasRibbon }"
+      >
         <button class="banner-main" type="button" :title="`Center on ${todayBanner.day.label || 'this day'}`" @click="onGoDay(todayBanner.day)">
           <span class="banner-tag mono">{{ todayBanner.tag }}</span>
           <span class="banner-text">{{ todayBanner.text }}</span>
@@ -1311,6 +1315,11 @@ function bannerNameFor(day) {
   return dayPlaceNames.value[day.id] || 'On the road'
 }
 
+// Used by the banner's CSS to push it below the trip ribbon (desktop only).
+// The ribbon is only rendered when there are itinerary days, so when there
+// are none we keep the banner at the smaller top offset.
+const hasRibbon = computed(() => (mapData.value?.itinerary || []).length > 0)
+
 const todayBanner = computed(() => {
   const days = mapData.value?.itinerary || []
   if (!days.length) return null
@@ -2088,12 +2097,14 @@ onBeforeUnmount(() => {
 }
 .link-pick:hover { color: var(--vermillion-deep); }
 
-/* Today banner — sits below the trip ribbon (when present) so the two
-   chrome elements don't overlap. The 4.2rem top accounts for the ribbon's
-   ~3.4rem height + a small gap. */
+/* Today banner — sits below the trip ribbon when one is visible (desktop +
+   itinerary present). The ribbon takes ~64–80px of flow space at the top
+   of .map-wrap; absolute positioning relative to .map-wrap means we have
+   to manually offset past it. With no ribbon we keep the small offset.
+   Mobile hides the ribbon entirely so the with-ribbon class is a no-op. */
 .today-banner {
   position: absolute;
-  top: 4.2rem;
+  top: 1rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 700;
@@ -2105,6 +2116,14 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   max-width: calc(100% - 2rem);
   overflow: hidden;
+}
+.today-banner.with-ribbon {
+  /* Push past the trip ribbon (5.5rem ≈ 88px) plus an 8px breathing gap.
+     Mobile drops back to the no-ribbon offset because the ribbon is hidden. */
+  top: calc(5.5rem + 8px);
+}
+@media (max-width: 720px) {
+  .today-banner.with-ribbon { top: 1rem; }
 }
 .banner-main {
   background: transparent;
