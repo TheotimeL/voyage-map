@@ -722,7 +722,10 @@ function initLeaflet() {
     zoomControl: false,
     attributionControl: true,
   })
-  L.control.zoom({ position: 'topright' }).addTo(leaflet)
+  // Bottom-right keeps zoom controls clear of the top-right detail card and
+  // the trip ribbon along the top. The "locate me" button + FAB are also at
+  // the bottom-right but stacked with margin in their own absolute styling.
+  L.control.zoom({ position: 'bottomright' }).addTo(leaflet)
   attachTiles()
 
   const center = [mapData.value.center_lat, mapData.value.center_lng]

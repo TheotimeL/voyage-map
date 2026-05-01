@@ -133,7 +133,8 @@ onMounted(async () => {
 
 function initLeaflet() {
   leaflet = L.map(mapEl.value, { zoomControl: false, attributionControl: true })
-  L.control.zoom({ position: 'topright' }).addTo(leaflet)
+  // Match the editor's placement so the two views feel like the same map.
+  L.control.zoom({ position: 'bottomright' }).addTo(leaflet)
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap © CARTO',
     subdomains: 'abcd',

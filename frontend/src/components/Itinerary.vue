@@ -14,7 +14,14 @@
     <Transition name="reveal">
       <section v-if="addOpen" class="add-inline">
         <form class="iti-add" @submit.prevent="addEmptyDay">
-          <input v-model="form.date" type="date" class="field add-date" :min="firstISO" required />
+          <input
+            v-model="form.date"
+            type="date"
+            class="field add-date"
+            :min="firstISO"
+            :max="lastISO || undefined"
+            required
+          />
           <button class="btn btn-add" type="submit" title="Add an empty stop with no location">+ Stop</button>
         </form>
         <GeocoderSearch
@@ -463,7 +470,23 @@ watch(() => props.days, (next) => {
   if (next && next.length) form.date = nextDateAfter([...next].sort((a, b) => a.date.localeCompare(b.date)).at(-1).date)
 }, { immediate: true })
 
-const firstISO = computed(() => '2020-01-01')
+// Date input bounds for the inline add-stop form. The min anchors to the
+// trip's first date when there are stops (so a typo can't slip the new stop
+// to 2020); otherwise it falls back to today (a fresh trip can't have stops
+// in the past). Max is the trip's last date + 30d so a phone digit slip
+// can't yield a 2099 stop.
+const firstISO = computed(() => {
+  if (!props.days.length) return today.value
+  const earliest = [...props.days].sort((a, b) => a.date.localeCompare(b.date))[0].date
+  return earliest
+})
+const lastISO = computed(() => {
+  if (!props.days.length) return ''
+  const latest = [...props.days].sort((a, b) => endOf(a).localeCompare(endOf(b))).at(-1)
+  const d = new Date(endOf(latest))
+  d.setUTCDate(d.getUTCDate() + 30)
+  return d.toISOString().slice(0, 10)
+})
 
 // A stop is "today" when today is within [date, end_date] inclusive.
 const todayDay = computed(() => props.days.find((d) => today.value >= d.date && today.value <= endOf(d)) || null)

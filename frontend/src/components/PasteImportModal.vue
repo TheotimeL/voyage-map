@@ -86,7 +86,8 @@ mardi 12 mai, Cave Spring, Sedona AZ
           :disabled="!stats.ok"
           @click="onImport"
         >
-          Import {{ stats.ok || '' }} day{{ stats.ok === 1 ? '' : 's' }}
+          <template v-if="stats.ok">Import {{ stats.ok }} day{{ stats.ok === 1 ? '' : 's' }}</template>
+          <template v-else>Preview to import</template>
         </button>
       </div>
     </div>
