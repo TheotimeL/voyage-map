@@ -35,13 +35,11 @@
         <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
         <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
         <p class="hint mono gpx-hint">
-          <span>Trails:</span>
-          <span>drop a <code>.gpx</code> on the map</span>
-          <span class="sep">·</span>
           <label class="link-pick">
-            <span>pick a file</span>
+            <span>+ Import GPX trail</span>
             <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
           </label>
+          <span class="gpx-aside">or drop on the map</span>
         </p>
       </template>
 
@@ -222,6 +220,9 @@ const modal = ref(null)
 const detail = ref(null)
 const editingDay = ref(null)
 const dropMode = ref(false)
+// Persist the user's last selected tab per slug so revisiting a trip
+// re-opens where they left off, not "Places" by default.
+const tabKey = computed(() => `voyage:tab:${props.slug}`)
 watch(dropMode, (on) => {
   document.body.classList.toggle('drop-mode', on)
 })
@@ -396,6 +397,10 @@ watch(activeId, (next, prev) => {
 
 watch(theme, () => { if (leaflet) attachTiles() })
 
+watch(activeTab, (k) => {
+  try { localStorage.setItem(tabKey.value, k) } catch { /* private mode */ }
+})
+
 // Keep the recents stats in sync as the user edits the map. Without this the
 // home page would still report whatever counts existed when the map last
 // loaded (a recurring "0 pins" bug).
@@ -448,6 +453,28 @@ const trackLines = new Map() // track id → L.polyline
 const itineraryMarkers = new Map() // day id → L.marker
 const survivalGroup = ref(null)
 function getMapBounds() { return leaflet?.getBounds() }
+function renderSurvival(items) {
+  if (!leaflet) return
+  if (survivalGroup.value) leaflet.removeLayer(survivalGroup.value)
+  survivalGroup.value = L.layerGroup()
+  for (const it of items) {
+    const m = L.marker([it.lat, it.lng], {
+      icon: L.divIcon({
+        className: 'survival-pin',
+        html: `<div class="sp"><span>${it.icon}</span></div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      }),
+    })
+    m.bindTooltip(it.label, { direction: 'top', offset: [0, -10] })
+    survivalGroup.value.addLayer(m)
+  }
+  survivalGroup.value.addTo(leaflet)
+}
+function clearSurvival() {
+  if (survivalGroup.value && leaflet) leaflet.removeLayer(survivalGroup.value)
+  survivalGroup.value = null
+}
 
 // Bias passed to geocoder: prefer the visible map area; fall back to the
 // seed center with a generous radius so first-load searches still get results.
@@ -480,28 +507,6 @@ const pinCandidates = computed(() => {
       icon: emojiByCategory[p.category] || '📍',
     }))
 })
-function renderSurvival(items) {
-  if (!leaflet) return
-  if (survivalGroup.value) leaflet.removeLayer(survivalGroup.value)
-  survivalGroup.value = L.layerGroup()
-  for (const it of items) {
-    const m = L.marker([it.lat, it.lng], {
-      icon: L.divIcon({
-        className: 'survival-pin',
-        html: `<div class="sp"><span>${it.icon}</span></div>`,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-      }),
-    })
-    m.bindTooltip(it.label, { direction: 'top', offset: [0, -10] })
-    survivalGroup.value.addLayer(m)
-  }
-  survivalGroup.value.addTo(leaflet)
-}
-function clearSurvival() {
-  if (survivalGroup.value && leaflet) leaflet.removeLayer(survivalGroup.value)
-  survivalGroup.value = null
-}
 const gpxDragging = ref(false)
 const gpxError = ref('')
 let dragCounter = 0
@@ -523,6 +528,14 @@ onMounted(async () => {
       },
       { lastCenter: { lat: m.center_lat, lng: m.center_lng } },
     )
+    // Pick the most useful tab on load: remembered choice → itinerary if any
+    // days exist (road-trip planning is the primary use) → places otherwise.
+    const remembered = localStorage.getItem(tabKey.value)
+    if (remembered && tabs.some((t) => t.key === remembered)) {
+      activeTab.value = remembered
+    } else if ((m.itinerary || []).length > 0) {
+      activeTab.value = 'itinerary'
+    }
     loading.value = false
     await nextTick()
     initLeaflet()

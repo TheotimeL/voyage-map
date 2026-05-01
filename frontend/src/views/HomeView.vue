@@ -5,29 +5,66 @@
         <span class="brand-mark">●</span>
         <span class="brand-name">Voyage Map</span>
       </span>
-      <span class="brand-meta mono">№ 001 · FIELD GUIDE</span>
+      <span class="brand-meta mono">FIELD GUIDE · EST {{ year }}</span>
     </header>
 
     <section class="hero">
       <div class="hero-text">
-        <p class="eyebrow">Plot your course</p>
+        <p class="eyebrow">Road-trip planner</p>
         <h1>
-          Pin a place.<br />
-          <span class="hl">Share a map.</span>
+          Sketch the route.<br />
+          <span class="hl">Share the map.</span>
         </h1>
         <p class="lede">
-          A bare-bones travel journal: anyone with the URL can drop pins,
-          jot notes, and shape the map together. No accounts, no setup.
+          Drop pins, stitch days together, and send the link. No accounts —
+          anyone with the URL can plan along.
         </p>
       </div>
-
       <div class="hero-mark">
-        <CompassRose :size="180" />
+        <CompassRose :size="160" />
       </div>
     </section>
 
+    <section class="form">
+      <p class="form-eyebrow mono">Where does the trip begin?</p>
+      <GeocoderSearch
+        placeholder="Las Vegas · Yosemite · Grand Canyon · Big Sur…"
+        :bias="homeBias"
+        @pick="onPick"
+      />
+      <div class="form-row-actions">
+        <button class="locate-link" type="button" @click="useMyLocation" :disabled="locating">
+          ⌖ {{ locating ? 'Locating…' : 'Start from my location' }}
+        </button>
+        <span class="qs-divider mono">or jump to</span>
+        <span class="quick-starts">
+          <button v-for="p in quickStarts" :key="p.label" class="qs-chip" type="button" @click="onPick({ lat: p.lat, lng: p.lng, label: p.label })">{{ p.label }}</button>
+        </span>
+      </div>
+      <p v-if="locateError" class="error sm">{{ locateError }}</p>
+
+      <Transition name="reveal">
+        <div v-if="picked" class="preview-wrap">
+          <div ref="mapEl" class="preview-map"></div>
+          <div class="row">
+            <input
+              v-model="title"
+              class="field title-field"
+              placeholder="Name your trip — e.g. Vegas → SF"
+              maxlength="120"
+              @keydown.enter.prevent="create"
+            />
+            <button class="btn" :disabled="creating" @click="create">
+              {{ creating ? 'Plotting…' : 'Begin trip →' }}
+            </button>
+          </div>
+          <p v-if="error" class="error">{{ error }}</p>
+        </div>
+      </Transition>
+    </section>
+
     <section v-if="recents.length" class="recents">
-      <p class="eyebrow lbl">Resume a voyage</p>
+      <p class="eyebrow lbl">Resume a trip</p>
       <ul class="recents-list">
         <li v-for="r in recents" :key="r.slug" class="recent-card">
           <router-link
@@ -35,7 +72,7 @@
             class="recent-link"
             :title="`Open /m/${r.slug}`"
           >
-            <span class="recent-title">{{ r.title || 'Untitled voyage' }}</span>
+            <span class="recent-title">{{ r.title || 'Untitled trip' }}</span>
             <span v-if="r.stats" class="recent-stats mono">
               <template v-if="r.stats.days">{{ r.stats.days }} day{{ r.stats.days === 1 ? '' : 's' }} · </template>
               <template v-if="r.stats.trails">{{ r.stats.trails }} trail{{ r.stats.trails === 1 ? '' : 's' }} · </template>
@@ -61,42 +98,8 @@
       </ul>
     </section>
 
-    <section class="form">
-      <label class="eyebrow lbl">01 · Where to?</label>
-      <GeocoderSearch
-        placeholder="Las Vegas · Mt. Fuji · 11° N 80° W…"
-        :bias="homeBias"
-        @pick="onPick"
-      />
-      <button class="locate-link" type="button" @click="useMyLocation" :disabled="locating">
-        ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
-      </button>
-      <p v-if="locateError" class="error sm">{{ locateError }}</p>
-
-      <Transition name="reveal">
-        <div v-if="picked" class="preview-wrap">
-          <p class="eyebrow lbl">02 · Preview</p>
-          <div ref="mapEl" class="preview-map"></div>
-
-          <p class="eyebrow lbl">03 · Name it (optional) and go</p>
-          <div class="row">
-            <input
-              v-model="title"
-              class="field title-field"
-              placeholder="e.g. Vegas → SF road trip"
-              maxlength="120"
-            />
-            <button class="btn" :disabled="creating" @click="create">
-              {{ creating ? 'Plotting…' : 'Begin journey →' }}
-            </button>
-          </div>
-          <p v-if="error" class="error">{{ error }}</p>
-        </div>
-      </Transition>
-    </section>
-
     <footer class="foot mono">
-      EST. {{ year }} · CARTOGRAPHY BY YOU
+      Tap the map to drop pins · drag day numbers to refine · share the URL
     </footer>
   </main>
 </template>
@@ -121,6 +124,15 @@ const error = ref('')
 const locating = ref(false)
 const locateError = ref('')
 const recents = ref(recentMaps())
+
+// Pre-baked starting points covering the classic west-USA loops — gives
+// new visitors a one-click way to start without typing.
+const quickStarts = [
+  { label: 'Las Vegas',   lat: 36.1699, lng: -115.1398 },
+  { label: 'Los Angeles', lat: 34.0522, lng: -118.2437 },
+  { label: 'Denver',      lat: 39.7392, lng: -104.9903 },
+  { label: 'Seattle',     lat: 47.6062, lng: -122.3321 },
+]
 
 // Bias the home search by the most recent voyage's centre — anchors the user
 // in their familiar territory between sessions.
@@ -250,10 +262,10 @@ onBeforeUnmount(() => {
   min-height: 100%;
   max-width: 980px;
   margin: 0 auto;
-  padding: 1.4rem clamp(1.2rem, 4vw, 3rem) 5rem;
+  padding: 1.4rem clamp(1.2rem, 4vw, 3rem) 4rem;
   display: flex;
   flex-direction: column;
-  gap: 2.2rem;
+  gap: 2rem;
   position: relative;
 }
 
@@ -285,7 +297,7 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 2rem;
   align-items: center;
-  padding-top: 0.5rem;
+  padding-top: 0.4rem;
 }
 .hero-text { min-width: 0; }
 h1 { margin: 0.5rem 0 1rem; }
@@ -300,13 +312,89 @@ h1 { margin: 0.5rem 0 1rem; }
 .lede {
   font-size: 1.05rem;
   color: var(--ink-soft);
-  max-width: 38ch;
+  max-width: 42ch;
   margin: 0;
 }
-.hero-mark { display: grid; place-items: center; padding: 0.5rem; }
+.hero-mark { display: grid; place-items: center; }
+
+/* Form ----------------------------------------------------------- */
+.form {
+  display: grid;
+  gap: 0.75rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 1.3rem 1.4rem 1.5rem;
+  box-shadow: 6px 6px 0 var(--ink);
+}
+.form-eyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.form-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+  margin-top: -0.1rem;
+}
+
+.preview-wrap { display: grid; gap: 0.75rem; margin-top: 0.4rem; }
+.preview-map {
+  width: 100%;
+  height: 260px;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--cream-deep);
+}
+
+.row { display: flex; gap: 0.7rem; align-items: stretch; flex-wrap: wrap; }
+.title-field { flex: 1; min-width: 220px; }
+.error { color: var(--vermillion-deep); font-weight: 500; margin: 0; }
+.error.sm { font-size: 0.85rem; }
+
+.locate-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vermillion);
+  cursor: pointer;
+}
+.locate-link:hover { color: var(--vermillion-deep); }
+.locate-link:disabled { color: var(--ink-faded); cursor: wait; }
+
+.qs-divider {
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.quick-starts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.qs-chip {
+  background: transparent;
+  border: 1px solid var(--cream-edge);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 90ms ease;
+}
+.qs-chip:hover { border-color: var(--vermillion); color: var(--vermillion); background: var(--cream); }
 
 /* Recents -------------------------------------------------------- */
-.recents { margin-bottom: 1.4rem; }
 .recents .lbl { margin-bottom: 0.5rem; display: block; }
 .recents-list {
   list-style: none;
@@ -363,64 +451,22 @@ h1 { margin: 0.5rem 0 1rem; }
 .recent-action:hover { color: var(--vermillion); background: var(--cream); }
 .recent-forget:hover { color: var(--vermillion); background: var(--cream); }
 
-/* Form ----------------------------------------------------------- */
-.form {
-  display: grid;
-  gap: 0.9rem;
-  border: 1.5px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  padding: 1.4rem 1.4rem 1.6rem;
-  box-shadow: 6px 6px 0 var(--ink);
-}
-.lbl { color: var(--ink); font-weight: 700; }
-.eyebrow.lbl { margin: 0; }
-
-.preview-wrap { display: grid; gap: 0.9rem; margin-top: 0.4rem; }
-.preview-map {
-  width: 100%;
-  height: 280px;
-  border: 1.5px solid var(--ink);
-  border-radius: 4px;
-  background: var(--cream-deep);
-}
-
-.row { display: flex; gap: 0.7rem; align-items: stretch; flex-wrap: wrap; }
-.title-field { flex: 1; min-width: 220px; }
-.error { color: var(--vermillion-deep); font-weight: 500; margin: 0; }
-.error.sm { font-size: 0.85rem; }
-
-.locate-link {
-  background: transparent;
-  border: none;
-  padding: 0.1rem 0;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--vermillion);
-  cursor: pointer;
-  justify-self: start;
-  margin-top: -0.4rem;
-}
-.locate-link:hover { color: var(--vermillion-deep); }
-.locate-link:disabled { color: var(--ink-faded); cursor: wait; }
-
 /* Footer --------------------------------------------------------- */
 .foot {
   text-align: center;
-  font-size: 0.74rem;
-  letter-spacing: 0.22em;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
   color: var(--ink-faded);
   padding-top: 1rem;
-  border-top: 1.5px solid var(--ink);
+  border-top: 1px dashed var(--cream-edge);
 }
 
 .reveal-enter-active { transition: opacity 280ms ease, transform 280ms ease; }
 .reveal-enter-from { opacity: 0; transform: translateY(8px); }
 
 @media (max-width: 720px) {
-  .hero { grid-template-columns: 1fr; }
-  .hero-mark { justify-self: start; }
+  .hero { grid-template-columns: 1fr; gap: 1rem; }
+  .hero-mark { display: none; }
+  .form-row-actions { flex-direction: column; align-items: flex-start; gap: 0.45rem; }
 }
 </style>

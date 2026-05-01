@@ -1,5 +1,15 @@
 <template>
   <div class="more-menu">
+    <section class="more-block share-block">
+      <div class="more-row">
+        <h4 class="more-title">Share this trip</h4>
+        <button class="btn btn-tiny" type="button" @click="emit('copy-url')">
+          {{ copied ? 'Copied ✓' : 'Copy link' }}
+        </button>
+      </div>
+      <p class="hint mono">Anyone with the URL can edit pins and days.</p>
+    </section>
+
     <section v-if="stats" class="more-block stats-block">
       <h4 class="more-title">Trip stats</h4>
       <ul class="stats">
@@ -28,15 +38,7 @@
         <h4 class="more-title">Offline tiles</h4>
         <PrecacheButton :theme="theme" />
       </div>
-    </section>
-
-    <section class="more-block">
-      <div class="more-row">
-        <h4 class="more-title">Share link</h4>
-        <button class="btn btn-tiny" type="button" @click="emit('copy-url')">
-          {{ copied ? 'Copied ✓' : 'Copy link' }}
-        </button>
-      </div>
+      <p class="hint mono">Cache the trip area for spotty cell coverage.</p>
     </section>
 
     <section class="more-block">
@@ -68,8 +70,9 @@ const emit = defineEmits(['render-survival', 'clear-survival', 'copy-url'])
 
 <style scoped>
 .more-menu { display: flex; flex-direction: column; gap: 1rem; }
-.more-block { padding-bottom: 0.6rem; border-bottom: 1px dashed var(--cream-edge); }
+.more-block { padding-bottom: 0.8rem; border-bottom: 1px dashed var(--cream-edge); }
 .more-block:last-child { border-bottom: none; padding-bottom: 0; }
+.share-block { padding-bottom: 1rem; }
 .more-title {
   font-family: var(--mono);
   font-size: 0.78rem;
@@ -85,10 +88,15 @@ const emit = defineEmits(['render-survival', 'clear-survival', 'copy-url'])
   gap: 0.8rem;
 }
 .more-row .more-title { margin: 0; flex-shrink: 0; }
-/* Normalize the action buttons across More rows so they line up. */
 .more-row :deep(.btn-tiny) {
   min-width: 9rem;
   padding-block: 0.5rem;
+}
+.hint {
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  margin: 0.4rem 0 0;
+  letter-spacing: 0.04em;
 }
 
 /* Stats grid */
