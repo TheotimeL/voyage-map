@@ -1921,7 +1921,10 @@ onBeforeUnmount(() => {
   padding-left: 392px;
 }
 @media (max-width: 720px) {
-  .trip-ribbon { display: none; }
+  /* Mobile: thinner variant — kept visible above the map, no dock offset.
+     The component itself drops the day-number + date chips at this width
+     so the ribbon is roughly half the desktop height. */
+  .trip-ribbon { padding-left: 0; }
 }
 .error { color: var(--vermillion-deep); }
 

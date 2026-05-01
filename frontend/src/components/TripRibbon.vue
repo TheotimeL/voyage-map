@@ -130,4 +130,25 @@ function formatChip(iso) {
   color: var(--ink-faded);
   letter-spacing: 0.06em;
 }
+
+/* Mobile: thinner variant — name-only chips, ~28px tall, scrollable.
+   Day-number badge and date chip are dropped to save horizontal width;
+   the "today" red fill stays so position-in-trip is still readable. */
+@media (max-width: 720px) {
+  .ribbon { padding: 0.2rem 0.4rem 0.25rem 0; gap: 0.25rem; }
+  .rib-stop {
+    min-width: 72px;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+  }
+  .rib-stop::after { display: none; }
+  .rib-num,
+  .rib-date { display: none; }
+  .rib-name {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+}
 </style>

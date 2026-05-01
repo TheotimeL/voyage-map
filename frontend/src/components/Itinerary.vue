@@ -43,8 +43,9 @@
     <ol v-if="rows.length" class="iti-list">
       <template v-for="r in rows" :key="r.day.id">
         <li v-if="r.weekHeader" class="iti-week-sep mono">
-          <span>Week {{ r.weekNum }}</span>
+          <span class="week-tag">Week {{ r.weekNum }}</span>
           <span class="week-meta">{{ r.weekRange }}</span>
+          <span v-if="r.weekSummary" class="week-summary">{{ r.weekSummary }}</span>
         </li>
         <li
           class="iti-day"
@@ -65,11 +66,15 @@
               {{ glyphFor(forecastFor(r.day).code) }}
               {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°
               <template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
-              <span
-                v-if="bestMorning(r.day)"
-                class="iti-run mono"
-                :title="`Calmest 3-hour window for an early effort, by mean temp + rain probability`"
-              >▸ run {{ bestMorning(r.day) }}</span>
+            </p>
+            <p
+              v-if="bestMorning(r.day)"
+              class="iti-run-row mono"
+              :title="`Calmest 3-hour window for an early effort, by mean temp + rain probability`"
+            >
+              <span class="run-glyph" aria-hidden="true">▸</span>
+              <span class="run-label">run</span>
+              <span class="run-window">{{ bestMorning(r.day) }}</span>
             </p>
             <p v-else-if="weatherTooFar(r.day)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days from today (${weatherStartDate})`">
               · weather in {{ weatherTooFar(r.day) }}d
@@ -547,6 +552,22 @@ const rows = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
   if (!sorted.length) return []
   const tripStart = new Date(sorted[0].date)
+  // Pre-compute per-week stop count + driving km so the week header carries
+  // a small summary chip ("3 stops · 624 km") on desktop. Two passes is fine
+  // — under 100 rows in any realistic trip.
+  const weekStats = new Map() // weekNum → { stops, km }
+  for (let i = 0; i < sorted.length; i++) {
+    const day = sorted[i]
+    const next = i < sorted.length - 1 ? sorted[i + 1] : null
+    const wn = Math.floor((new Date(day.date) - tripStart) / 86400000 / 7) + 1
+    const ws = weekStats.get(wn) || { stops: 0, km: 0 }
+    ws.stops += 1
+    if (next && day.lat != null && day.lng != null && next.lat != null && next.lng != null) {
+      const real = legFor(day, next)
+      ws.km += real ? real.km : (legKm(day, next) || 0)
+    }
+    weekStats.set(wn, ws)
+  }
   const out = []
   let cumulative = 0
   let lastWeekNum = 0
@@ -571,15 +592,21 @@ const rows = computed(() => {
     const weekNum = Math.floor(dayOffset / 7) + 1
     const weekHeader = weekNum !== lastWeekNum
     let weekRange = ''
+    let weekSummary = ''
     if (weekHeader) {
       const weekStart = new Date(tripStart)
       weekStart.setUTCDate(weekStart.getUTCDate() + (weekNum - 1) * 7)
       const weekEnd = new Date(weekStart)
       weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
       weekRange = `${weekStart.getUTCDate()}–${weekEnd.getUTCDate()} ${shortMonth(weekEnd.toISOString().slice(0, 10))}`
+      const ws = weekStats.get(weekNum)
+      if (ws) {
+        const km = Math.round(ws.km)
+        weekSummary = km > 0 ? `${ws.stops} stop${ws.stops === 1 ? '' : 's'} · ${km.toLocaleString()} km` : `${ws.stops} stop${ws.stops === 1 ? '' : 's'}`
+      }
       lastWeekNum = weekNum
     }
-    out.push({ day, dayLabel, spanISO, cleanLabel, legNext, weekHeader, weekNum, weekRange })
+    out.push({ day, dayLabel, spanISO, cleanLabel, legNext, weekHeader, weekNum, weekRange, weekSummary })
     cumulative += span
   }
   return out
@@ -798,23 +825,35 @@ function legKm(a, b) {
   gap: 0.35rem;
 }
 .iti-week-sep {
-  margin: 0.5rem 0 0.1rem;
+  margin: 0.7rem 0 0.2rem;
   display: flex;
   align-items: baseline;
-  gap: 0.6rem;
-  font-size: 0.62rem;
+  gap: 0.5rem;
+  font-size: 0.66rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--ink-faded);
+  color: var(--ink);
 }
-.iti-week-sep::after {
+.iti-week-sep .week-tag { font-weight: 700; }
+.iti-week-sep .week-meta { color: var(--ink-faded); }
+.iti-week-sep::before {
   content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--cream-edge);
+  flex: 0 0 0.4rem;
+  height: 2px;
+  background: var(--ink);
+  margin-right: 0.1rem;
 }
-.iti-week-sep .week-meta { color: var(--ink-faded); opacity: 0.8; }
+.iti-week-sep .week-summary {
+  margin-left: auto;
+  color: var(--ink-faded);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
 .iti-list > .iti-week-sep:first-child { margin-top: 0; }
+@media (max-width: 720px) {
+  .iti-week-sep .week-summary { display: none; }
+}
 .iti-day {
   display: grid;
   grid-template-columns: 36px 1fr auto;
@@ -1151,22 +1190,40 @@ function legKm(a, b) {
   letter-spacing: 0.06em;
 }
 .iti-day.today .iti-sun { color: rgba(255,255,255,0.75); }
-.iti-run {
-  display: inline-block;
-  margin-left: 0.4rem;
-  padding: 0.02rem 0.35rem;
-  font-size: 0.66rem;
-  letter-spacing: 0.06em;
+/* Promoted run-window row — for a trail runner this is THE feature, so it
+   gets its own line directly under the weather, slightly larger than the
+   weather/sun lines, with a vermillion glyph that catches the eye. */
+.iti-run-row {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
   color: var(--vermillion);
-  background: var(--paper);
-  border: 1px dotted var(--cream-edge);
-  border-radius: 2px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  padding: 0.05rem 0.5rem 0.08rem;
+  border-left: 2px solid var(--vermillion);
+  background: var(--cream);
+  border-radius: 0 2px 2px 0;
 }
-.iti-day.today .iti-run {
-  color: var(--paper);
-  border-color: rgba(255,255,255,0.5);
+.iti-run-row .run-glyph { color: var(--vermillion); font-weight: 600; }
+.iti-run-row .run-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.iti-run-row .run-window {
+  font-weight: 600;
+}
+.iti-day.today .iti-run-row {
   background: var(--vermillion-deep);
+  border-left-color: var(--paper);
+  color: var(--paper);
 }
+.iti-day.today .iti-run-row .run-glyph,
+.iti-day.today .iti-run-row .run-window { color: var(--paper); }
+.iti-day.today .iti-run-row .run-label { color: rgba(255,255,255,0.7); }
 
 .iti-photo-strip {
   list-style: none;

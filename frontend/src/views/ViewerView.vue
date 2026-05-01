@@ -33,6 +33,10 @@
               <span class="viewer-stop-body">
                 <span class="viewer-stop-name">{{ row.day.label || 'Untitled' }}</span>
                 <span class="viewer-stop-date mono">{{ formatDateRange(row.day) }}</span>
+                <span v-if="row.day.notes" class="viewer-stop-notes">{{ row.day.notes }}</span>
+                <span v-if="row.tags.length" class="viewer-stop-tags mono">
+                  <span v-for="t in row.tags" :key="t" class="viewer-tag">{{ t }}</span>
+                </span>
               </span>
             </button>
           </li>
@@ -78,15 +82,33 @@ const statsLine = computed(() => {
 
 // Stop labels accumulate the trip-day number across spans, so a 2-day stop
 // "1–2" is followed by "3–4", not "2–3" (which would re-use day 2 — the
-// off-by-one I shipped first time).
+// off-by-one I shipped first time). `tags` carry small mono chips
+// summarising photo + attached-pin counts so the viewer sidebar isn't bare.
 const stopRows = computed(() => {
   let cumulative = 0
+  const points = mapData.value?.points || []
+  const pinCounts = new Map()
+  const trailCounts = new Map()
+  for (const p of points) {
+    if (p.itinerary_day_id == null) continue
+    const map = p.gpx_data ? trailCounts : pinCounts
+    map.set(p.itinerary_day_id, (map.get(p.itinerary_day_id) || 0) + 1)
+  }
   return sortedDays.value.map((d) => {
     const span = Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1
     const startNum = cumulative + 1
     const endNum = cumulative + span
     cumulative += span
-    return { day: d, label: span > 1 ? `${startNum}–${endNum}` : `${startNum}` }
+    const photoCount = (() => {
+      try { return d.photos ? (JSON.parse(d.photos) || []).length : 0 } catch { return 0 }
+    })()
+    const tags = []
+    if (photoCount) tags.push(`${photoCount} 📷`)
+    const pc = pinCounts.get(d.id) || 0
+    if (pc) tags.push(`${pc} pin${pc === 1 ? '' : 's'}`)
+    const tc = trailCounts.get(d.id) || 0
+    if (tc) tags.push(`${tc} trail${tc === 1 ? '' : 's'}`)
+    return { day: d, label: span > 1 ? `${startNum}–${endNum}` : `${startNum}`, tags }
   })
 })
 
@@ -346,6 +368,30 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 .viewer-stop-date { font-size: 0.7rem; color: var(--ink-faded); letter-spacing: 0.04em; }
+.viewer-stop-notes {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viewer-stop-tags {
+  margin-top: 0.2rem;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.viewer-tag {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
+  padding: 0.05rem 0.35rem;
+  border-radius: 2px;
+}
 .viewer-loading {
   display: grid;
   place-items: center;
