@@ -533,14 +533,14 @@ function legKm(a, b) {
   margin: 0.2rem 0;
   padding: 0;
   display: grid;
-  gap: 0.25rem;
+  gap: 0.35rem;
 }
 .iti-day {
   display: grid;
   grid-template-columns: 36px 1fr auto;
   gap: 0.6rem;
-  align-items: center;
-  padding: 0.35rem 0.4rem;
+  align-items: start;
+  padding: 0.4rem 0.4rem;
   border: 1px solid transparent;
   border-radius: 3px;
 }
@@ -560,6 +560,7 @@ function legKm(a, b) {
   display: grid;
   text-align: center;
   line-height: 1;
+  padding-top: 0.1rem;
 }
 .iti-date.is-cont { align-items: stretch; padding-block: 0.4rem; }
 .cont-rule {
@@ -584,13 +585,12 @@ function legKm(a, b) {
   color: var(--ink);
   cursor: pointer;
   text-align: left;
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: 0.45rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-wrap: wrap;
   max-width: 100%;
+  line-height: 1.25;
 }
 .day-num {
   font-size: 0.6rem;
@@ -606,9 +606,17 @@ function legKm(a, b) {
 }
 .day-label {
   font-weight: 600;
-  white-space: nowrap;
+  /* Allow up to two lines so long stop names like "Excalibur Lodge"
+     don't truncate to "Excalibur ..." in the ~360px desktop dock. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: normal;
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
 }
 .iti-label:hover .day-label { color: var(--vermillion); }
 .iti-day.today .iti-label:hover .day-label { color: var(--paper); text-decoration: underline; }
