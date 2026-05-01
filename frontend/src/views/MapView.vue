@@ -386,6 +386,18 @@ const pinsTabPoints = computed(() => {
   return (mapData.value.points || []).filter((p) => p.itinerary_day_id == null)
 })
 
+// Map-marker visibility: every pin shows on the map by default; only the
+// category filter hides markers. The Pins-tab Unplanned/All toggle is a
+// LIST filter, not a map filter — attaching a pin to a day shouldn't make
+// it disappear from the map.
+const mapPoints = computed(() => {
+  if (!mapData.value) return []
+  const pool = mapData.value.points || []
+  return hiddenCats.value.size === 0
+    ? pool
+    : pool.filter((p) => !hiddenCats.value.has(p.category))
+})
+
 const visiblePoints = computed(() => {
   if (!mapData.value) return []
   const pool = pinsTabPoints.value
@@ -404,8 +416,7 @@ const visiblePoints = computed(() => {
   return filtered
 })
 
-watch(visiblePoints, (next) => {
-  // Sync map markers: hide markers whose category is filtered out.
+watch(mapPoints, (next) => {
   const allowed = new Set(next.map((p) => p.id))
   for (const [id, marker] of pointMarkers.entries()) {
     const onMap = leaflet?.hasLayer(marker)
