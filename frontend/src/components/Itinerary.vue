@@ -97,21 +97,14 @@
             <button
               class="iti-icon"
               type="button"
-              :title="`Attach a pin to ${r.dayLabel}`"
+              :title="`Add a pin to ${r.dayLabel}`"
               @click="attachOpenForDay = attachOpenForDay === r.day.id ? null : r.day.id"
             >+</button>
-            <button
-              v-if="r.day.lat != null && r.day.lng != null"
-              class="iti-icon iti-icon-trail"
-              type="button"
-              :title="`Find trails near ${r.day.label || 'this stop'}`"
-              @click="trailFor = r.day"
-            >△</button>
             <button class="iti-icon" type="button" :title="`Edit ${r.dayLabel}`" @click="$emit('edit', r.day)">✎</button>
             <button class="iti-icon" type="button" :title="`Remove ${r.dayLabel}`" @click="del(r.day)">×</button>
           </div>
         </li>
-        <ul v-if="(pinsByDay.get(r.day.id) || []).length || attachOpenForDay === r.day.id" class="day-pins">
+        <ul v-if="(pinsByDay.get(r.day.id) || []).length" class="day-pins">
           <li v-for="p in (pinsByDay.get(r.day.id) || [])" :key="p.id" class="day-pin" @click.stop="$emit('select-point', p)">
             <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
             <span class="day-pin-title">{{ p.title || 'Untitled' }}</span>
@@ -122,61 +115,19 @@
               @click.stop="$emit('detach', p.id)"
             >−</button>
           </li>
-          <li v-if="attachOpenForDay === r.day.id" class="day-pin-picker">
-            <p v-if="!pickerCandidatesAll.length" class="picker-empty mono">
-              No pins yet. Drop one on the map first.
-              <button type="button" class="picker-cancel" @click="closePicker">cancel</button>
-            </p>
-            <template v-else>
-              <p class="picker-eyebrow mono">Attach or move a pin to {{ r.dayLabel }}</p>
-              <input
-                v-model="pickerQuery"
-                type="text"
-                class="field picker-filter"
-                placeholder="Filter by title…"
-                @click.stop
-                @keydown.esc.stop.prevent="closePicker"
-              />
-              <p
-                v-if="!pickerVisible(r.day.id).length"
-                class="picker-empty mono"
-              >No matches.</p>
-              <template v-else>
-                <p
-                  v-if="pickerVisible(r.day.id, 'unattached').length"
-                  class="picker-section mono"
-                >Unattached</p>
-                <ul v-if="pickerVisible(r.day.id, 'unattached').length" class="picker-list">
-                  <li v-for="p in pickerVisible(r.day.id, 'unattached')" :key="p.id">
-                    <button type="button" class="picker-item" @click.stop="pickAttach(r.day.id, p.id)">
-                      <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
-                      <span class="picker-item-title">{{ p.title }}</span>
-                    </button>
-                  </li>
-                </ul>
-                <p
-                  v-if="pickerVisible(r.day.id, 'attached').length"
-                  class="picker-section mono"
-                >Already attached elsewhere</p>
-                <ul v-if="pickerVisible(r.day.id, 'attached').length" class="picker-list">
-                  <li v-for="p in pickerVisible(r.day.id, 'attached')" :key="p.id">
-                    <button
-                      type="button"
-                      class="picker-item picker-item-attached"
-                      :title="`Move from ${otherDayLabel(p) || 'another day'} to ${r.dayLabel}`"
-                      @click.stop="pickAttach(r.day.id, p.id)"
-                    >
-                      <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
-                      <span class="picker-item-title">{{ p.title }}</span>
-                      <span class="picker-item-where mono">{{ otherDayLabel(p) }}</span>
-                    </button>
-                  </li>
-                </ul>
-              </template>
-              <button type="button" class="picker-cancel mono" @click="closePicker">cancel</button>
-            </template>
-          </li>
         </ul>
+        <div v-if="attachOpenForDay === r.day.id" class="day-pin-popover-wrap">
+          <DayAddPinPopover
+            :day="r.day"
+            :day-label="r.day.label || r.dayLabel"
+            :all-points="points"
+            :days="days"
+            :bias="bias"
+            @close="closePicker"
+            @add-new="(payload) => onAddPinNew(r.day, payload)"
+            @attach="(p) => pickAttach(r.day.id, p.pointId)"
+          />
+        </div>
         <div
           v-if="legShouldShow(r)"
           class="iti-leg mono"
@@ -211,16 +162,6 @@
       @close="showPaste = false"
       @import="onPasteImport"
     />
-
-    <TrailFinderModal
-      v-if="trailFor"
-      :lat="trailFor.lat"
-      :lng="trailFor.lng"
-      :name="trailFor.label || 'this day'"
-      @close="onTrailFinderClose"
-      @pick="onTrailPick"
-      @preview="(t) => $emit('trail-preview', t)"
-    />
   </section>
 </template>
 
@@ -232,7 +173,7 @@ import { dailyForecast, hourlyForecast, glyphFor } from '@/lib/weather.js'
 import { formatTime } from '@/lib/sun.js'
 import GeocoderSearch from './GeocoderSearch.vue'
 import PasteImportModal from './PasteImportModal.vue'
-import TrailFinderModal from './TrailFinderModal.vue'
+import DayAddPinPopover from './DayAddPinPopover.vue'
 import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 
 const props = defineProps({
@@ -243,8 +184,15 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'add', 'add-bulk', 'add-trail-pin', 'trail-preview', 'delete', 'go', 'edit',
-  'select-point', 'attach', 'detach',
+  'select-point', 'attach', 'detach', 'add-pin',
 ])
+
+// New: when DayAddPinPopover's "Search a place" creates a pin, route it
+// through MapView so the pin gets persisted with itinerary_day_id set.
+function onAddPinNew(day, payload) {
+  emit('add-pin', { dayId: day.id, ...payload })
+  closePicker()
+}
 
 const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
 function pinEmoji(p) { return p?.gpx_data ? '🥾' : (emojiByCategory[p?.category] || '📍') }
@@ -357,17 +305,6 @@ function onPasteImport(payload) {
   if (rows && rows.length) emit('add-bulk', { rows, replace })
 }
 
-const trailFor = ref(null)
-function onTrailPick(t) {
-  trailFor.value = null
-  emit('trail-preview', null)
-  emit('add-trail-pin', t)
-}
-function onTrailFinderClose() {
-  trailFor.value = null
-  // Closing the modal must also clear the hover preview line on the map.
-  emit('trail-preview', null)
-}
 
 const today = computed(() => todayISO())
 

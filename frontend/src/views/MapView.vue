@@ -1,120 +1,45 @@
 <template>
-  <main class="mapview" :class="{ 'dock-collapsed': dockCollapsed }">
-    <InfoPanel
+  <main class="mapview" :class="{ 'dock-collapsed': dockCollapsed, 'mode-plan': mode === 'plan' }">
+    <!-- Plan mode: full-page editable planner. Mounted side-by-side with the
+         map shell and toggled via v-show so Leaflet (initialized once on mount)
+         is never torn down — switching modes is instant and the cached tiles
+         + draggable day pins survive the swap. -->
+    <PlanView
       v-if="mapData"
-      :tabs="tabs"
-      :active="activeTab"
-      v-model:collapsed="dockCollapsed"
-      @update:active="(k) => activeTab = k"
+      v-show="mode === 'plan'"
+      class="plan-pane"
+      :title="mapData.title"
+      :days="mapData.itinerary || []"
+      :points="mapData.points || []"
+      :bias="searchBias"
+      @update:title="onTitleSave"
+      @add-day="onAddDay"
+      @delete-day="onDeleteDay"
+      @patch-day="({ day, payload }) => onPatchDay(day, payload)"
+      @edit-day="(d) => editingDay = d"
+      @add-pin="onAddPinToDay"
+      @attach-pin="onAttachPoint"
+      @detach-pin="onDetachPoint"
+      @edit-pin="onEditPin"
+      @delete-pin="onDeletePinFromList"
+      @open-paste="showPaste = true"
     >
-      <template #header>
-        <div class="dock-head-row">
-          <span
-            v-if="offlineSnapshot"
-            class="offline-badge mono"
-            title="No network — showing the last copy saved on this device. Edits will fail until you're back online."
-          >⤬ offline · cached</span>
-          <span v-else class="dock-eyebrow mono">Field guide</span>
-          <div class="dock-head-actions">
-            <button v-if="hasContent" class="head-icon mono" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
-            <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
-            <ThemeToggle class="head-icon" />
-            <button class="head-icon mono" type="button" title="Trip overview & settings" @click="showOverview = !showOverview">⋯</button>
-          </div>
-        </div>
-        <Transition name="reveal">
-          <div v-if="showOverview" class="dock-overview">
-            <p class="overview-eyebrow mono">This trip</p>
-            <p class="overview-line mono">{{ overviewLine }}</p>
-            <RouterLink :to="{ path: '/', query: { home: 1 } }" class="overview-link mono">＋ Start a new voyage</RouterLink>
-          </div>
-        </Transition>
-        <h2 class="title">
-          <input
-            v-model="titleDraft"
-            class="title-input"
-            placeholder="Untitled voyage"
-            maxlength="120"
-            @blur="commitTitle"
-            @keydown.enter="$event.target.blur()"
-          />
-        </h2>
+      <template #mode-toggle>
+        <ModeToggleControl :mode="mode" @change="setMode" />
       </template>
+      <template #head-tools>
+        <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
+        <ThemeToggle class="head-icon" />
+        <button class="head-icon mono" type="button" title="Tools — survival, sun, offline tiles" @click.stop="toolsOpen = !toolsOpen">⋯</button>
+        <button class="head-icon mono" type="button" title="Re-fit map to all points and days" @click="recenter">↻</button>
+        <RouterLink :to="{ path: '/', query: { home: 1 } }" class="head-icon mono" title="Start a new voyage" style="text-decoration: none;">＋</RouterLink>
+      </template>
+    </PlanView>
 
-      <template #places>
-        <div class="pins-search-row">
-          <GeocoderSearch class="pins-search" placeholder="Search a spot to mark…" :bias="searchBias" @pick="onSearchPick" />
-          <button
-            class="pins-locate"
-            type="button"
-            :disabled="locating"
-            :title="locating ? 'Locating…' : 'Use my location to sort by distance'"
-            aria-label="Use my location"
-            @click="markMyLocation"
-          >⌖</button>
-        </div>
-        <p v-if="locateError" class="error sm">{{ locateError }}</p>
-        <div class="pins-filter mono">
-          <div class="seg" role="tablist">
-            <button
-              type="button"
-              class="seg-btn"
-              :class="{ on: !showAllPins }"
-              :aria-pressed="!showAllPins"
-              title="Pins not yet attached to any day"
-              @click="showAllPins = false"
-            >Unplanned</button>
-            <button
-              type="button"
-              class="seg-btn"
-              :class="{ on: showAllPins }"
-              :aria-pressed="showAllPins"
-              title="Every pin, including those linked to a day"
-              @click="showAllPins = true"
-            >All</button>
-          </div>
-          <span class="filter-meta">{{ pinsTabPoints.length }}/{{ (mapData.points || []).length }}</span>
-          <CategoryFilters class="pins-cats" :points="pinsTabPoints" :hidden="hiddenCats" @toggle="toggleCat" @reset="resetCats" />
-        </div>
-        <PointList :points="visiblePoints" :active-id="activeId" @select="onSelectPoint" />
-        <p v-if="gpxError" class="error sm">{{ gpxError }}</p>
-        <p class="hint mono gpx-hint">
-          Drop a <code>.gpx</code> on the map · <label class="link-pick">pick a file<input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" /></label>
-        </p>
-      </template>
-
-      <template #itinerary>
-        <Itinerary
-          :days="mapData.itinerary || []"
-          :points="mapData.points || []"
-          :bias="searchBias"
-          :slug="props.slug"
-          @add="onAddDay"
-          @add-bulk="onAddDaysBulk"
-          @add-trail-pin="onAddTrailPin"
-          @trail-preview="onTrailPreview"
-          @delete="onDeleteDay"
-          @go="onGoDay"
-          @edit="(d) => editingDay = d"
-          @select-point="onSelectPoint"
-          @attach="onAttachPoint"
-          @detach="onDetachPoint"
-        />
-      </template>
-      <template #more>
-        <MoreMenu
-          :fallback-lat="mapData.center_lat"
-          :fallback-lng="mapData.center_lng"
-          :get-bounds="getMapBounds"
-          :theme="theme"
-          :place-name="todayBanner?.day?.label || ''"
-          :next-leg-bbox="nextLegBbox"
-          @render-survival="renderSurvival"
-          @clear-survival="clearSurvival"
-        />
-      </template>
-    </InfoPanel>
-
+    <!-- Map shell: dockless. The InfoPanel/MobileSheet was the old "Trip /
+         Pins / Tools" drawer; it now lives as PlanView (table) + the Tools
+         popover triggered from the topbar. The map fills the screen. -->
+    <div v-show="mode === 'map'" class="map-shell">
     <div
       class="map-wrap"
       @dragover.prevent="onGpxDragOver"
@@ -183,7 +108,6 @@
         @drop="onFabDrop"
         @search="onFabSearch"
         @add-stop="onFabAddStop"
-        @find-trails="onFabFindTrails"
       />
       <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
 
@@ -221,7 +145,75 @@
           <button type="button" class="del-toast-undo mono" @click="undoDelete">Undo</button>
         </div>
       </Transition>
+
+      <!-- Top-left: trip identity (editable title + offline badge). Kept thin
+           and discreet so it doesn't compete with the ribbon for attention. -->
+      <div v-if="mapData" class="map-topleft">
+        <input
+          v-model="titleDraft"
+          class="map-topleft-title"
+          placeholder="Untitled voyage"
+          maxlength="120"
+          @blur="commitTitle"
+          @keydown.enter="$event.target.blur()"
+        />
+        <span v-if="offlineSnapshot" class="offline-badge mono" title="No network — showing the last copy saved on this device.">⤬ offline</span>
+      </div>
+
+      <!-- Map-mode floating top-right toolbar. Compact: just the mode toggle
+           + the actions that need a home now that the dock is gone. -->
+      <div v-if="mapData" class="map-topbar">
+        <ModeToggleControl :mode="mode" @change="setMode" />
+        <div class="map-topbar-actions">
+          <button v-if="hasContent" class="head-icon mono" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
+          <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
+          <ThemeToggle class="head-icon" />
+          <button class="head-icon mono" type="button" title="Tools — survival, sun, offline tiles" @click.stop="toolsOpen = !toolsOpen">⋯</button>
+        </div>
+        <span v-if="offlineSnapshot" class="offline-badge mono" title="No network — showing the last copy saved on this device.">⤬ offline</span>
+      </div>
     </div>
+    </div>
+
+    <!-- Tools popover — shared by both modes. Anchored to the ⋯ button in the
+         topbar (Map mode) or in the Plan head-tools slot (Plan mode). Lives
+         outside the map-shell so it floats above either layout. -->
+    <Transition name="reveal">
+      <div v-if="toolsOpen && mapData" class="tools-popover paper" @click.stop>
+        <div class="tools-head">
+          <p class="eyebrow">Tools</p>
+          <button class="tools-close" type="button" @click="toolsOpen = false">×</button>
+        </div>
+        <MoreMenu
+          :fallback-lat="mapData.center_lat"
+          :fallback-lng="mapData.center_lng"
+          :get-bounds="getMapBounds"
+          :theme="theme"
+          :place-name="todayBanner?.day?.label || ''"
+          :next-leg-bbox="nextLegBbox"
+          @render-survival="renderSurvival"
+          @clear-survival="clearSurvival"
+        />
+        <div class="tools-extra">
+          <button class="btn btn-tiny btn-ghost" type="button" @click="openPasteFromTools">Paste import…</button>
+          <label class="btn btn-tiny btn-ghost" :title="`Drop a .gpx track on the map, or pick a file`">
+            GPX import…
+            <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
+          </label>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Hoisted PasteImportModal so it can be opened from Plan mode (PlanView
+         emits @open-paste) or from the Tools popover in Map mode. The one
+         inside Itinerary.vue still works for the mobile-sheet path. -->
+    <PasteImportModal
+      v-if="showPaste"
+      :default-year="defaultYearForPaste"
+      :bias="searchBias"
+      @close="showPaste = false"
+      @import="onPasteImportTopLevel"
+    />
 
     <PointFormModal
       v-if="modal"
@@ -239,19 +231,6 @@
       @save="(payload) => onPatchDay(editingDay, payload)"
       @locate-candidates="(c) => candidatesFor = c"
       @close="editingDay = null"
-    />
-
-    <!-- FAB-initiated trail finder (vs the per-day finder mounted inside
-         Itinerary.vue). Anchored at the map centre and routes through the
-         same add-trail-pin handler so the persistence path is identical. -->
-    <TrailFinderModal
-      v-if="fabTrailFor"
-      :lat="fabTrailFor.lat"
-      :lng="fabTrailFor.lng"
-      :name="fabTrailFor.label"
-      @close="fabTrailFor = null; onTrailPreview(null)"
-      @pick="(t) => { fabTrailFor = null; onAddTrailPin(t); }"
-      @preview="onTrailPreview"
     />
 
     <Teleport to="body">
@@ -298,6 +277,10 @@ import MapFab from '@/components/MapFab.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import TrailFinderModal from '@/components/TrailFinderModal.vue'
 import TripRibbon from '@/components/TripRibbon.vue'
+import PlanView from '@/components/PlanView.vue'
+import PasteImportModal from '@/components/PasteImportModal.vue'
+import ModeToggleControl from '@/components/ModeToggleControl.vue'
+import { RouterLink } from 'vue-router'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap, updateRecentStats } from '@/lib/recents.js'
@@ -316,6 +299,35 @@ const error = ref('')
 const titleDraft = ref('')
 const activeTab = ref('itinerary')
 const dockCollapsed = ref(false)
+
+// View mode: 'plan' (full-page editable planner — table of stops + pin grid)
+// or 'map' (map-first, no left dock on desktop). Persisted per slug because a
+// trip in active travel wants Map by default; a trip being prepared wants Plan.
+const modeStorageKey = computed(() => `voyage-mode:${props.slug}`)
+const mode = ref('plan')
+onMounted(() => {
+  const saved = localStorage.getItem(modeStorageKey.value)
+  if (saved === 'plan' || saved === 'map') mode.value = saved
+})
+function setMode(next) {
+  mode.value = next
+  try { localStorage.setItem(modeStorageKey.value, next) } catch { /* private mode */ }
+}
+
+// Mobile media query: drives whether the dock-vs-sheet variant of InfoPanel
+// renders, and also whether the plan-mode top bar collapses to a tighter row.
+const mqMobile = window.matchMedia('(max-width: 720px)')
+const isMobile = ref(mqMobile.matches)
+function onMqChange(e) { isMobile.value = e.matches }
+onMounted(() => mqMobile.addEventListener('change', onMqChange))
+onBeforeUnmount(() => mqMobile.removeEventListener('change', onMqChange))
+
+// Tools popover state: holds the MoreMenu (survival, sun, precache) and Paste
+// import — surfaced in both modes via a top-right ⋯ button so the dock-only
+// tools don't disappear when the dock does.
+const toolsOpen = ref(false)
+const showPaste = ref(false)
+function openPasteFromTools() { toolsOpen.value = false; showPaste.value = true }
 // No emoji — the cream/ink palette plus typographic eyebrows do the visual
 // work; color emoji clash with the paper aesthetic. Glyphs below are
 // monoglyph unicode marks (chevron / pin-shape / dots) that pick up the
@@ -731,10 +743,10 @@ function initLeaflet() {
     zoomControl: false,
     attributionControl: true,
   })
-  // Bottom-right keeps zoom controls clear of the top-right detail card and
-  // the trip ribbon along the top. The "locate me" button + FAB are also at
-  // the bottom-right but stacked with margin in their own absolute styling.
-  L.control.zoom({ position: 'bottomright' }).addTo(leaflet)
+  // Bottom-LEFT now that the dock is gone — leaves the bottom-right column
+  // (locate-me + FAB) uncluttered, so the user's two main +/− interactions
+  // (zoom map vs add to trip) don't visually compete.
+  L.control.zoom({ position: 'bottomleft' }).addTo(leaflet)
   attachTiles()
 
   const center = [mapData.value.center_lat, mapData.value.center_lng]
@@ -1814,6 +1826,94 @@ async function commitTitle() {
   }
 }
 
+// PlanView emits @update:title with its own draft. Funnel through commitTitle
+// so the network call + rollback paths are shared with the Map-mode editor.
+async function onTitleSave(next) {
+  titleDraft.value = (next || '').trim()
+  await commitTitle()
+}
+
+// PlanView's "+ pin to a stop" calls back here with the geocoded result + the
+// target day id. We create the pin attached to that day, render its marker,
+// and refresh map state. No detail card opens — the Plan table already shows
+// the new chip on its row, which is the affordance the user is looking at.
+async function onAddPinToDay({ dayId, lat, lng, title, category }) {
+  try {
+    const created = await api.addPoint(props.slug, {
+      lat, lng,
+      title: title || null,
+      category: category || 'note',
+      itinerary_day_id: dayId,
+    })
+    if (!mapData.value.points) mapData.value.points = []
+    mapData.value.points.push(created)
+    addPointMarker(created)
+  } catch (e) { error.value = e.message }
+}
+
+// PlanView emits @edit-pin (clicking a pin chip or wishlist card) — open the
+// shared PointFormModal in edit mode. The existing onSave path handles the
+// patch + marker refresh.
+function onEditPin(p) {
+  modal.value = { ...p }
+}
+
+// PlanView's wishlist × button — funnel into the same soft-delete machinery
+// as the map detail card so the user always gets the 5s undo toast.
+function onDeletePinFromList(point) {
+  if (!point?.id) return
+  scheduleSoftDelete({
+    kind: 'point',
+    message: `Pin "${point.title || 'untitled'}" deleted`,
+    hide: () => removePointMarker(point.id),
+    restore: () => addPointMarker(point),
+    commit: () => api.deletePoint(props.slug, point.id),
+    onCommit: () => {
+      mapData.value.points = mapData.value.points.filter((p) => p.id !== point.id)
+    },
+  })
+}
+
+// PasteImportModal hoisted at this level (so Plan mode can open it). The
+// payload shape mirrors what Itinerary's onPasteImport produces.
+const defaultYearForPaste = computed(() => {
+  const days = mapData.value?.itinerary || []
+  if (days.length) return parseInt(days[0].date.slice(0, 4), 10)
+  return new Date().getFullYear()
+})
+function onPasteImportTopLevel(payload) {
+  showPaste.value = false
+  const rows = Array.isArray(payload) ? payload : payload?.rows
+  const replace = Array.isArray(payload) ? false : !!payload?.replace
+  if (rows && rows.length) onAddDaysBulk({ rows, replace })
+}
+
+// When the user switches to Map mode, Leaflet may have been hidden (the wrap
+// was display:none) — invalidate so it recomputes its size against the visible
+// container. Without this the tiles render only inside the original viewport
+// and the rest stays grey. On the very first switch, we also re-fit to content
+// because the initial bounds were computed against a hidden container.
+const _mapInteracted = ref(false)
+watch(mode, async (next) => {
+  if (next === 'map' && leaflet) {
+    await nextTick()
+    leaflet.invalidateSize()
+    if (!_mapInteracted.value) {
+      fitToContent()
+      _mapInteracted.value = true
+    }
+  }
+})
+
+// Click-outside handler for the tools popover.
+function onDocClickTools(e) {
+  if (!toolsOpen.value) return
+  const inside = e.target.closest?.('.tools-popover, [title^="Tools"]')
+  if (!inside) toolsOpen.value = false
+}
+onMounted(() => document.addEventListener('click', onDocClickTools, true))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClickTools, true))
+
 // Share URL: `/v/{slug}` is the read-only mirror; copying that instead of
 // `/m/{slug}` means the recipient can't accidentally edit the host's trip.
 function copyShareUrl() {
@@ -1898,11 +1998,161 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   display: flex;
-  --ribbon-pad: 392px;
+  /* Map mode (desktop): dock is gone, so the ribbon hugs the left edge with
+     a small inset, and reserves the right strip for the floating topbar pill. */
+  --ribbon-pad-left: 16px;
+  --ribbon-pad-right: 16px;
 }
-.mapview.dock-collapsed { --ribbon-pad: 72px; }
+@media (max-width: 720px) {
+  .mapview { --ribbon-pad-left: 8px; --ribbon-pad-right: 8px; }
+}
+.mapview .map-shell {
+  display: contents;
+}
+.mapview .map-shell .trip-ribbon {
+  padding-left: var(--ribbon-pad-left);
+  padding-right: var(--ribbon-pad-right);
+}
+
+/* Plan pane fills the viewport, scrolls independently. Sits above the map
+   shell when active (the shell is v-show'd off, but the rule here makes the
+   stacking unambiguous). */
+.plan-pane {
+  position: absolute;
+  inset: 0;
+  z-index: 900;
+  overflow-y: auto;
+}
+
+/* Floating top-right toolbar in Map mode. Editorial paper card with the
+   trip title + the same actions the dock used to host (mode toggle, recenter,
+   share, theme, tools, new voyage). */
+.map-topleft {
+  position: absolute;
+  top: 96px;
+  left: 12px;
+  z-index: 900;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 var(--ink), 0 6px 14px rgba(0, 0, 0, 0.12);
+  max-width: 22rem;
+}
+.map-topleft-title {
+  background: transparent;
+  border: none;
+  font-family: var(--display);
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+  width: 14rem;
+  padding: 0.05rem 0.1rem;
+  border-bottom: 1px dashed transparent;
+}
+.map-topleft-title:focus { outline: none; border-bottom-color: var(--ink-faded); }
+.map-topleft-title:hover { border-bottom-color: var(--cream-edge); }
+@media (max-width: 720px) {
+  .map-topleft {
+    top: 64px;
+    left: 8px;
+    padding: 0.25rem 0.5rem;
+  }
+  .map-topleft-title { width: 11rem; font-size: 0.85rem; }
+}
+
+.map-topbar {
+  position: absolute;
+  top: 96px;
+  right: 12px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.45rem;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 var(--ink), 0 6px 14px rgba(0, 0, 0, 0.12);
+}
+.map-topbar-actions { display: inline-flex; gap: 0.25rem; align-items: center; }
+.map-topbar .head-icon {
+  background: transparent;
+  border: 1px solid var(--cream-edge);
+  border-radius: 999px;
+  width: 1.85rem; height: 1.85rem;
+  display: grid; place-items: center;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: color 90ms, border-color 90ms;
+}
+.map-topbar .head-icon:hover { color: var(--vermillion); border-color: var(--vermillion); }
+@media (max-width: 720px) {
+  .map-topbar {
+    top: 64px;
+    right: 8px;
+    padding: 0.25rem 0.4rem;
+    border-radius: 999px;
+  }
+}
+
+.tools-popover {
+  position: absolute;
+  top: 70px;
+  right: 16px;
+  z-index: 950;
+  width: min(360px, calc(100% - 32px));
+  padding: 1rem 1.1rem 1.1rem;
+  display: grid;
+  gap: 0.8rem;
+  border: 1.5px solid var(--ink);
+  box-shadow: 0 12px 30px -10px rgba(0,0,0,0.22);
+}
+.tools-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px dashed var(--cream-edge);
+  padding-bottom: 0.4rem;
+}
+.tools-close {
+  background: transparent;
+  border: none;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--ink-faded);
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+.tools-close:hover { color: var(--ink); background: var(--cream); }
+.tools-extra {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--cream-edge);
+}
+.tools-extra .btn {
+  cursor: pointer;
+}
+.tools-extra label {
+  cursor: pointer;
+}
+.hidden { display: none; }
+
 .map-wrap {
   flex: 1;
+  /* Flexbox gotcha: a flex item's default min-width is `auto`, which equals
+     the *content's* min size. The ribbon's chips + the leaflet map together
+     push the wrap wider than the viewport without this. */
+  min-width: 0;
+  overflow: hidden;
   position: relative;
   height: 100%;
   display: flex;
@@ -1914,23 +2164,15 @@ onBeforeUnmount(() => {
   background: var(--cream-deep);
 }
 
-/* Trip ribbon: stripe above the map. The desktop dock floats over .map-wrap
-   (it's position:absolute), so we push the first chip clear with a padding
-   roughly matching the dock + its 16px margin. Hidden on phones — mobile
-   users have the full Trip tab in the sheet. */
+/* Trip ribbon: stripe above the map. The dock is gone in Map mode, so we
+   reserve a left inset (var --ribbon-pad-left) for breathing room and a right
+   inset (var --ribbon-pad-right) so the floating topbar pill doesn't sit on
+   top of the rightmost stops. The padding values are hoisted to .mapview so
+   the responsive breakpoints can override them in one place. */
 .trip-ribbon {
   position: relative;
   z-index: 650;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-  padding-left: var(--ribbon-pad, 392px);
-  transition: padding-left 120ms ease;
-}
-@media (max-width: 720px) {
-  /* Mobile: thinner variant — kept visible above the map, no dock offset.
-     The component itself drops the day-number + date chips at this width
-     so the ribbon is roughly half the desktop height. */
-  .mapview { --ribbon-pad: 0; }
-  .mapview.dock-collapsed { --ribbon-pad: 0; }
 }
 .error { color: var(--vermillion-deep); }
 
@@ -2195,7 +2437,9 @@ onBeforeUnmount(() => {
   top: calc(5.5rem + 8px);
 }
 @media (max-width: 720px) {
-  .today-banner.with-ribbon { top: 1rem; }
+  /* Mobile: ribbon is now visible too, so push the banner past it AND past
+     the topbar/topleft pills row (~52px after ribbon's ~52px). */
+  .today-banner.with-ribbon { top: calc(52px + 60px + 8px); }
 }
 .banner-main {
   background: transparent;

@@ -1,5 +1,5 @@
 <template>
-  <DesktopDock v-if="!isMobile" :collapsed="collapsed" @update:collapsed="$emit('update:collapsed', $event)">
+  <DesktopDock v-if="!isMobile && !desktopHidden" :collapsed="collapsed" @update:collapsed="$emit('update:collapsed', $event)">
     <header class="dock-head"><slot name="header" /></header>
     <TabBar :tabs="tabs" :active="active" @update:active="(k) => emit('update:active', k)" />
     <div class="tab-content"><slot :name="active" /></div>
@@ -9,7 +9,7 @@
     </template>
   </DesktopDock>
 
-  <MobileSheet v-else ref="sheetRef">
+  <MobileSheet v-else-if="isMobile" ref="sheetRef">
     <template #tabs>
       <TabBar :tabs="tabs" :active="active" @update:active="onMobileTab" />
     </template>
@@ -28,6 +28,10 @@ const props = defineProps({
   tabs: { type: Array, required: true },
   active: { type: String, required: true },
   collapsed: { type: Boolean, default: false },
+  // When true, the desktop DesktopDock is suppressed entirely (Map mode wants
+  // a full-bleed map). MobileSheet still mounts on mobile so handheld users
+  // keep their drawer.
+  desktopHidden: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:active', 'update:collapsed'])
 

@@ -24,13 +24,6 @@
             <em>Find by name</em>
           </span>
         </button>
-        <button type="button" class="fab-menu-item" @click="pick('trail')">
-          <span class="fab-menu-icon" aria-hidden="true">△</span>
-          <span class="fab-menu-text">
-            <strong>Trails near here</strong>
-            <em>OSM hiking + running routes</em>
-          </span>
-        </button>
       </div>
     </Transition>
     <button class="map-fab" type="button" :title="armedTitle" :class="{ armed }" @click="onClick">
@@ -47,7 +40,7 @@ const props = defineProps({
   // The popover hides itself in that case so the × on the FAB is unambiguous.
   armed: { type: Boolean, default: false },
 })
-const emit = defineEmits(['drop', 'search', 'add-stop', 'find-trails'])
+const emit = defineEmits(['drop', 'search', 'add-stop'])
 
 const open = ref(false)
 const armedTitle = computed(() =>
@@ -68,7 +61,6 @@ function pick(kind) {
   if (kind === 'pin') emit('drop', { cancel: false })
   else if (kind === 'search') emit('search')
   else if (kind === 'stop') emit('add-stop')
-  else if (kind === 'trail') emit('find-trails')
 }
 
 // Click-outside to close the menu.
