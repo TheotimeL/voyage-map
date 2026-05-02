@@ -66,11 +66,21 @@
             <span class="banner-text">{{ todayBanner.text }}</span>
           </div>
           <div
-            v-if="bannerWx || todayBanner.sun || todayBanner.notes || (todayBanner.live && nextLegInfo)"
+            v-if="bannerSpanWx.length || todayBanner.sun || todayBanner.notes || (todayBanner.live && nextLegInfo)"
             class="banner-row banner-row-meta mono"
           >
-            <span v-if="bannerWx" class="banner-wx">
-              {{ wxGlyph(bannerWx.code) }} {{ bannerWx.tMax }}° / {{ bannerWx.tMin }}°
+            <span
+              v-for="wx in bannerSpanWx"
+              :key="wx.date"
+              class="banner-wx"
+              :class="{ 'is-active': wx.isActive, 'is-faded': !wx.forecast }"
+              :title="`Forecast for ${wx.date}`"
+            >
+              <template v-if="bannerSpanWx.length > 1"><span class="banner-wx-tag">{{ wx.tag }}</span></template>
+              <template v-if="wx.forecast">
+                {{ wxGlyph(wx.forecast.code) }} {{ wx.forecast.tMax }}° / {{ wx.forecast.tMin }}°
+              </template>
+              <template v-else>—</template>
             </span>
             <span v-if="todayBanner.sun" class="banner-sun">
               ☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}
@@ -1802,16 +1812,34 @@ function dismissBanner() {
   sessionStorage.setItem(bannerDismissKey.value, '1')
 }
 
-// Forecast for today's banner — populated lazily on day change.
-const bannerWx = ref(null)
+// Forecast for today's banner — one entry per day in the stop's span so a
+// 2-day Vegas warm-up reads "D1 ☀ 39°/29° · D2 ⛰ 39°/28°" on the banner
+// instead of just the arrival day. In live mode (today is within the
+// span), the active day is marked so it can render bolder.
+const bannerSpanWx = ref([])
 watch(
   () => todayBanner.value?.day,
   async (day) => {
-    if (!day || day.lat == null || day.lng == null) { bannerWx.value = null; return }
-    bannerWx.value = await dailyForecast(day.lat, day.lng, day.date)
+    if (!day || day.lat == null || day.lng == null) { bannerSpanWx.value = []; return }
+    const start = day.date
+    const end = day.end_date || day.date
+    const span = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000))
+    const tdy = today.value
+    const out = []
+    for (let i = 0; i <= span; i++) {
+      const d = new Date(start)
+      d.setUTCDate(d.getUTCDate() + i)
+      const iso = d.toISOString().slice(0, 10)
+      const forecast = await dailyForecast(day.lat, day.lng, iso)
+      out.push({ date: iso, tag: `D${i + 1}`, forecast, isActive: iso === tdy })
+    }
+    bannerSpanWx.value = out
   },
   { immediate: true },
 )
+// Backward-compat: existing single-chip template references; first chip
+// with a real forecast becomes the legacy `bannerWx` value.
+const bannerWx = computed(() => bannerSpanWx.value.find((w) => w.forecast)?.forecast || null)
 
 async function onAddDay(payload) {
   try {
@@ -3015,6 +3043,14 @@ onBeforeUnmount(() => {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.banner-wx.is-active { color: rgba(255,255,255,0.95); font-weight: 600; }
+.banner-wx.is-faded { color: rgba(255,255,255,0.4); font-style: italic; }
+.banner-wx-tag {
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+  color: rgba(255,255,255,0.45);
+  margin-right: 0.25rem;
 }
 .banner-notes {
   font-family: var(--body);
