@@ -84,9 +84,10 @@
             v-if="todayBanner.live && nextStop"
             class="banner-advance mono"
             type="button"
-            :title="`Mark ${todayBanner.day.label || 'this stop'} done — jump to ${nextStop.label || 'the next stop'}`"
+            title="Mark this stop as completed"
+            :aria-label="`Mark ${todayBanner.day.label || 'this stop'} as completed and jump to ${nextStop.label || 'the next stop'}`"
             @click="advanceToNextStop"
-          >Made it →</button>
+          ><span class="banner-advance-tick" aria-hidden="true">✓</span> Made it →</button>
           <button class="banner-action" type="button" title="Edit this day" @click="editingDay = todayBanner.day">✎</button>
           <button class="banner-close" type="button" title="Hide for this session" @click="dismissBanner">×</button>
         </div>
@@ -547,6 +548,23 @@ watch(
   { deep: true },
 )
 
+// Re-render itinerary markers whenever the day-attachment of a pin changes
+// so the "+N" badge on each iti-pin stays accurate. Cheap key — just a
+// stringified per-day count, so we re-render once per attach/detach.
+watch(
+  () => {
+    const points = mapData.value?.points || []
+    const counts = {}
+    for (const p of points) {
+      if (p.itinerary_day_id != null) {
+        counts[p.itinerary_day_id] = (counts[p.itinerary_day_id] || 0) + 1
+      }
+    }
+    return JSON.stringify(counts)
+  },
+  () => renderItinerary(),
+)
+
 // Highlight the active trail polyline (thicken + bring to front) and reset
 // the others.
 watch(activeTrailPointId, (next) => {
@@ -797,6 +815,14 @@ function initLeaflet() {
   L.control.zoom({ position: 'bottomleft' }).addTo(leaflet)
   attachTiles()
 
+  // Keep Leaflet's cached container size in sync with reality. Without this,
+  // any resize that happens after init (ribbon mounts after first frame,
+  // banner appears, viewport rotation, etc.) leaves the click→latlng math
+  // anchored to the old size — so dropped pins land tens of pixels off
+  // visually, which at zoom 12 means kilometres on the ground (the
+  // "Angels Landing → Kane County" reverse-geocode bug).
+  attachMapResizeObserver()
+
   const center = [mapData.value.center_lat, mapData.value.center_lng]
   // Initial view: fit to points + itinerary if any, otherwise centre on the map's saved center.
   fitToContent({ initial: true, fallbackCenter: center })
@@ -830,10 +856,29 @@ function initLeaflet() {
   renderItinerary()
 }
 
-function makeItineraryIcon(num, isToday = false) {
+let mapResizeObserver = null
+function attachMapResizeObserver() {
+  if (!mapEl.value || typeof ResizeObserver === 'undefined') return
+  if (mapResizeObserver) mapResizeObserver.disconnect()
+  // animate:false — invalidateSize on a first-load resize would otherwise pan
+  // away from the freshly-fitted bounds.
+  mapResizeObserver = new ResizeObserver(() => {
+    if (leaflet) leaflet.invalidateSize({ animate: false, pan: false })
+  })
+  mapResizeObserver.observe(mapEl.value)
+}
+
+function makeItineraryIcon(num, isToday = false, attachedPinCount = 0) {
+  // Decoration for days that have attached pins — at low zoom the actual
+  // category pins overlap (and lose to) the iti-pin's z-index, so without
+  // this badge users can't tell that any pins exist on a 10-stop overview
+  // until they drill into a region.
+  const badge = attachedPinCount > 0
+    ? `<span class="iti-pin-pins" aria-hidden="true">+${attachedPinCount}</span>`
+    : ''
   return L.divIcon({
     className: `iti-pin-wrapper${isToday ? ' is-today' : ''}`,
-    html: `<div class="iti-pin"><span>${num}</span></div>`,
+    html: `<div class="iti-pin"><span>${num}</span></div>${badge}`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   })
@@ -851,6 +896,14 @@ function renderItinerary() {
     .sort((a, b) => a.date.localeCompare(b.date))
 
   const today = todayISO()
+  // Count attached pins per day so the iti-pin badge can advertise them at
+  // overview zoom (where the actual pins disappear under the day chip).
+  const pinsByDay = new Map()
+  for (const p of mapData.value?.points || []) {
+    if (p.itinerary_day_id != null) {
+      pinsByDay.set(p.itinerary_day_id, (pinsByDay.get(p.itinerary_day_id) || 0) + 1)
+    }
+  }
   let cumulative = 0
   stops.forEach((d) => {
     const end = d.end_date || d.date
@@ -858,8 +911,9 @@ function renderItinerary() {
     const startNum = cumulative + 1
     const endNum = cumulative + span
     const isToday = today >= d.date && today <= end
+    const pinCount = pinsByDay.get(d.id) || 0
     const m = L.marker([d.lat, d.lng], {
-      icon: makeItineraryIcon(span > 1 ? `${startNum}–${endNum}` : startNum, isToday),
+      icon: makeItineraryIcon(span > 1 ? `${startNum}–${endNum}` : startNum, isToday, pinCount),
       title: `${d.label || 'Stop'} — drag to refine, click to focus`,
       zIndexOffset: 600,
       draggable: true,
@@ -1409,11 +1463,52 @@ function bannerNameFor(day) {
 // are none we keep the banner at the smaller top offset.
 const hasRibbon = computed(() => (mapData.value?.itinerary || []).length > 0)
 
+// Day id of the stop the user just tapped from the ribbon, banner, or a stop
+// marker. Drives the outlined-chip "selected" state in TripRibbon so users
+// keep their place on a long trip, AND retargets the today-banner so weather/
+// sunrise/next-leg meta reflect whichever stop they're inspecting (rather
+// than staying frozen on today's stop).
+const selectedRibbonDayId = ref(null)
+
 const todayBanner = computed(() => {
   const days = mapData.value?.itinerary || []
   if (!days.length) return null
   const t = today.value
   const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date))
+
+  // If the user picked a stop (ribbon chip or marker), the banner follows
+  // that selection. "live" stays true only when the chosen stop spans today —
+  // otherwise the "Made it →" / sunset countdown affordances would be wrong.
+  const selectedId = selectedRibbonDayId.value
+  if (selectedId != null) {
+    const sel = sorted.find((d) => d.id === selectedId)
+    if (sel) {
+      const idx = sorted.indexOf(sel)
+      const selSpan = Math.round((new Date(sel.end_date || sel.date) - new Date(sel.date)) / 86400000) + 1
+      let cumulative = 0
+      let totalNights = 0
+      for (let i = 0; i < sorted.length; i++) {
+        const d = sorted[i]
+        const span = Math.round((new Date(d.end_date || d.date) - new Date(d.date)) / 86400000) + 1
+        if (i < idx) cumulative += span
+        totalNights += span
+      }
+      const isLive = t >= sel.date && t <= (sel.end_date || sel.date)
+      const startNum = cumulative + 1
+      const endNum = cumulative + selSpan
+      const tag = selSpan > 1
+        ? `Day ${startNum}–${endNum} / ${totalNights}`
+        : `Day ${startNum} / ${totalNights}`
+      return attachSun({
+        tag,
+        text: bannerNameFor(sel).toUpperCase(),
+        notes: sel.notes || null,
+        day: sel,
+        live: isLive,
+      })
+    }
+  }
+
   // Within a multi-day stop, today is "between" date and end_date (inclusive).
   const todayStop = sorted.find((d) => t >= d.date && t <= (d.end_date || d.date))
   if (todayStop) {
@@ -1707,14 +1802,15 @@ async function onPatchDay(day, payload) {
 
 const candidatesFor = ref(null)
 
-// Day id of the stop the user just tapped from the ribbon (or banner). Drives
-// the outlined-chip "selected" state in TripRibbon so users keep their place
-// on a long trip without staring at the live "today" red.
-const selectedRibbonDayId = ref(null)
-
 async function onGoDay(day) {
   if (!leaflet) return
   selectedRibbonDayId.value = day?.id ?? null
+  // The banner content keys off the selection — if the user dismissed the
+  // banner earlier, surface it again so they actually see the new context.
+  if (bannerDismissed.value) {
+    bannerDismissed.value = false
+    sessionStorage.removeItem(bannerDismissKey.value)
+  }
   if (day.lat != null && day.lng != null) {
     leaflet.flyTo([day.lat, day.lng], Math.max(leaflet.getZoom(), 11), { duration: 0.6 })
     return
@@ -2033,6 +2129,10 @@ onMounted(() => window.addEventListener('keydown', onEsc))
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onEsc)
+  if (mapResizeObserver) {
+    mapResizeObserver.disconnect()
+    mapResizeObserver = null
+  }
   if (leaflet) {
     leaflet.remove()
     leaflet = null
@@ -2609,8 +2709,16 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
   background: var(--vermillion);
   color: var(--paper);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .banner-advance:hover { background: var(--vermillion-deep); }
+.banner-advance-tick {
+  font-size: 0.85rem;
+  line-height: 1;
+  letter-spacing: 0;
+}
 .banner-action:hover { background: var(--vermillion-deep); color: var(--paper); }
 .banner-close:hover { background: rgba(255,255,255,0.12); color: var(--paper); }
 .banner-next {

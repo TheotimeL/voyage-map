@@ -1,23 +1,45 @@
 <template>
-  <nav v-if="rows.length" ref="ribEl" class="ribbon" aria-label="Trip overview">
+  <div
+    v-if="rows.length"
+    class="ribbon-shell"
+    :class="{ 'has-overflow-left': hasOverflowLeft, 'has-overflow-right': hasOverflowRight }"
+  >
     <button
-      v-for="r in rows"
-      :key="r.day.id"
+      v-if="hasOverflowLeft"
       type="button"
-      class="rib-stop"
-      :class="{ today: r.isToday, past: r.isPast, selected: selectedDayId === r.day.id }"
-      :title="`${r.dateLine} · ${r.day.label || 'Untitled'}`"
-      @click="$emit('go', r.day)"
-    >
-      <span class="rib-num mono">{{ r.numLabel }}</span>
-      <span class="rib-name">{{ r.shortName || 'Untitled' }}</span>
-      <span class="rib-date mono">{{ r.dateChip }}</span>
-    </button>
-  </nav>
+      class="ribbon-arrow ribbon-arrow-left mono"
+      title="Scroll earlier stops into view"
+      aria-label="Scroll left"
+      @click="scrollByStep(-1)"
+    >‹</button>
+    <nav ref="ribEl" class="ribbon" aria-label="Trip overview" @scroll.passive="updateOverflow">
+      <button
+        v-for="r in rows"
+        :key="r.day.id"
+        type="button"
+        class="rib-stop"
+        :class="{ today: r.isToday, past: r.isPast, selected: selectedDayId === r.day.id }"
+        :title="`${r.dateLine} · ${r.day.label || 'Untitled'}`"
+        @click="$emit('go', r.day)"
+      >
+        <span class="rib-num mono">{{ r.numLabel }}</span>
+        <span class="rib-name">{{ r.shortName || 'Untitled' }}</span>
+        <span class="rib-date mono">{{ r.dateChip }}</span>
+      </button>
+    </nav>
+    <button
+      v-if="hasOverflowRight"
+      type="button"
+      class="ribbon-arrow ribbon-arrow-right mono"
+      title="Scroll later stops into view"
+      aria-label="Scroll right"
+      @click="scrollByStep(1)"
+    >›</button>
+  </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { todayISO } from '@/util.js'
 
 const props = defineProps({
@@ -32,6 +54,26 @@ defineEmits(['go'])
 const today = computed(() => todayISO())
 const ribEl = ref(null)
 
+// Overflow state — drives the left/right scroll arrows + edge fade gradients
+// so a 21-stop trip stops silently clipping past the viewport edge.
+const hasOverflowLeft = ref(false)
+const hasOverflowRight = ref(false)
+function updateOverflow() {
+  const root = ribEl.value
+  if (!root) return
+  hasOverflowLeft.value = root.scrollLeft > 4
+  hasOverflowRight.value = root.scrollLeft + root.clientWidth < root.scrollWidth - 4
+}
+
+function scrollByStep(dir) {
+  const root = ribEl.value
+  if (!root) return
+  // ~75% of the visible width per click — enough to feel like real travel
+  // along the trip without skipping past the chips at the new edge.
+  const step = Math.max(120, Math.round(root.clientWidth * 0.75))
+  root.scrollBy({ left: dir * step, behavior: 'smooth' })
+}
+
 // Center today's chip (or the next future stop, if today is between stops)
 // in the visible ribbon so users don't have to scroll right mid-trip. If
 // every stop is in the future the first chip stays at the left as-is.
@@ -41,17 +83,46 @@ function scrollActiveIntoView(behavior = 'auto') {
   const target = root.querySelector('.rib-stop.selected')
     || root.querySelector('.rib-stop.today')
     || [...root.querySelectorAll('.rib-stop:not(.past)')][0]
-  if (!target) return
+  if (!target) {
+    updateOverflow()
+    return
+  }
   // Don't scroll if the active stop is already the first one — keep the
   // natural left-anchored layout for pre-trip and just-started trips.
-  if (target === root.firstElementChild) return
+  if (target === root.firstElementChild) {
+    updateOverflow()
+    return
+  }
   const left = target.offsetLeft - root.clientWidth / 2 + target.clientWidth / 2
   root.scrollTo({ left: Math.max(0, left), behavior })
+  // scrollTo schedules a smooth animation; refresh state after it settles
+  // (and once synchronously so arrows appear immediately on mount).
+  updateOverflow()
+  setTimeout(updateOverflow, 250)
 }
 
-onMounted(() => nextTick(() => scrollActiveIntoView('auto')))
-watch(() => props.days, () => nextTick(() => scrollActiveIntoView('auto')), { deep: true })
-watch(() => props.selectedDayId, () => nextTick(() => scrollActiveIntoView('smooth')))
+let resizeObs = null
+onMounted(() => {
+  nextTick(() => {
+    scrollActiveIntoView('auto')
+    updateOverflow()
+  })
+  if (typeof ResizeObserver !== 'undefined' && ribEl.value) {
+    resizeObs = new ResizeObserver(() => updateOverflow())
+    resizeObs.observe(ribEl.value)
+  }
+})
+onBeforeUnmount(() => {
+  if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
+})
+watch(() => props.days, () => nextTick(() => {
+  scrollActiveIntoView('auto')
+  updateOverflow()
+}), { deep: true })
+watch(() => props.selectedDayId, () => nextTick(() => {
+  scrollActiveIntoView('smooth')
+  updateOverflow()
+}))
 
 const rows = computed(() => {
   const sorted = [...props.days].sort((a, b) => a.date.localeCompare(b.date))
@@ -88,18 +159,81 @@ function formatChip(iso) {
 </script>
 
 <style scoped>
+.ribbon-shell {
+  position: relative;
+  background: var(--paper);
+  border-bottom: 1px solid var(--cream-edge);
+}
 .ribbon {
   display: flex;
   gap: 0.2rem;
   align-items: stretch;
   overflow-x: auto;
   padding: 0.4rem 0.5rem 0.4rem 0;
-  background: var(--paper);
-  border-bottom: 1px solid var(--cream-edge);
   scrollbar-width: thin;
+  scroll-behavior: smooth;
 }
 .ribbon::-webkit-scrollbar { height: 6px; }
 .ribbon::-webkit-scrollbar-thumb { background: var(--cream-edge); border-radius: 3px; }
+
+/* Edge fade gradients — only visible when the ribbon overflows in that
+   direction, signalling to the user that more stops exist off-screen. */
+.ribbon-shell::before,
+.ribbon-shell::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  z-index: 2;
+}
+.ribbon-shell::before {
+  left: 0;
+  background: linear-gradient(to right, var(--paper) 30%, rgba(0, 0, 0, 0));
+}
+.ribbon-shell::after {
+  right: 0;
+  background: linear-gradient(to left, var(--paper) 30%, rgba(0, 0, 0, 0));
+}
+.ribbon-shell.has-overflow-left::before { opacity: 1; }
+.ribbon-shell.has-overflow-right::after { opacity: 1; }
+
+/* Scroll arrow buttons — only render when there's actually content to scroll
+   to, so a 5-stop trip doesn't get useless chrome. */
+.ribbon-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--cream-edge);
+  border-radius: 50%;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  transition: background 90ms ease, color 90ms ease, border-color 90ms ease;
+}
+.ribbon-arrow:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.ribbon-arrow-left { left: 4px; }
+.ribbon-arrow-right { right: 4px; }
+@media (max-width: 720px) {
+  /* Phones: rely on touch scrolling + the fade gradient — the arrows would
+     compete with the already-tight ribbon. */
+  .ribbon-arrow { display: none; }
+}
 
 .rib-stop {
   flex: 0 0 auto;

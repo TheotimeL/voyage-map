@@ -242,6 +242,32 @@ input[type="range"]::-moz-range-thumb {
 }
 .iti-pin:hover { background: var(--vermillion); }
 
+/* "+N" badge — top-right of the iti-pin, advertises that the day has pins
+   attached. Without it, at continental zoom the actual category pins lose to
+   the iti-pin's higher z-index and the day reads as "no pins" until the user
+   zooms in. The badge stays visible at every zoom so users always know which
+   stops have pins to drill into. */
+.iti-pin-pins {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--vermillion);
+  color: var(--paper);
+  border: 1.5px solid var(--paper);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 11px;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+[data-theme="dark"] .iti-pin-pins { border-color: var(--ink); }
+
 /* Itinerary day label tooltip on the map */
 .leaflet-tooltip.iti-tip {
   background: rgba(255, 255, 255, 0.92);
