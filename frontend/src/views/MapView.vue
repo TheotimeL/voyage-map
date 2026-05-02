@@ -87,7 +87,7 @@
               <template v-if="todayBanner.live && sunsetCountdown"> · sunset {{ sunsetCountdown }}</template>
             </span>
             <span v-if="todayBanner.live && nextLegInfo" class="banner-next">↳ next: {{ nextLegInfo }}</span>
-            <span v-if="todayBanner.notes" class="banner-notes">{{ todayBanner.notes }}</span>
+            <span v-if="todayBanner.notes" class="banner-notes">{{ markdownExcerpt(todayBanner.notes, 140) }}</span>
           </div>
         </button>
         <div class="banner-actions">
@@ -306,7 +306,7 @@ import SunCalc from 'suncalc'
 import { formatTime, arrivalSafety } from '@/lib/sun.js'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
-import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX, markdownExcerpt } from '@/util.js'
 import { geocode, categoryFromOSM, reverseGeocode } from '@/api.js'
 import Itinerary from '@/components/organisms/Itinerary.vue'
 import PointList from '@/components/molecules/PointList.vue'
