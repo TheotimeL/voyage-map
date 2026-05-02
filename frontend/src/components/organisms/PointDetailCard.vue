@@ -25,7 +25,7 @@
       <span>{{ trailStats.km }} km<template v-if="trailStats.gain != null"> · D+ {{ trailStats.gain }} m</template></span>
     </p>
 
-    <p v-if="point.comment" class="comment">{{ point.comment }}</p>
+    <MarkdownView v-if="point.comment" :source="point.comment" class="comment" />
     <p v-else class="comment muted"><em>No notes yet.</em></p>
 
     <p class="coord meta">
@@ -45,6 +45,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { CATEGORIES, formatLat, formatLng, openInMaps, parseGPX } from '@/util.js'
+import MarkdownView from '@/components/molecules/MarkdownView.vue'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { reverseGeocode } from '@/api.js'
 
@@ -165,7 +166,6 @@ function onDirections() {
   font-size: 0.96rem;
   color: var(--ink-soft);
   margin: 0;
-  white-space: pre-wrap;
 }
 .comment.muted { color: var(--ink-faded); }
 

@@ -45,12 +45,7 @@
           @click="toggleFlag(f.key)"
         >{{ f.label }}</button>
       </div>
-      <textarea
-        v-model="form.comment"
-        class="field"
-        maxlength="2000"
-        placeholder="What's here? Why does it matter?"
-      />
+      <MarkdownEditor v-model="form.comment" placeholder="Notes, links, photos…" />
 
       <label class="lbl">Category</label>
       <div class="cat-grid">
@@ -78,6 +73,7 @@
 <script setup>
 import { computed, reactive, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { CATEGORIES, formatLat, formatLng } from '@/util.js'
+import MarkdownEditor from '@/components/molecules/MarkdownEditor.vue'
 
 // Vanlife/trip shorthand chips that prepend to the comment as `[FLAG] …`.
 // Limited set so the field stays scannable.
