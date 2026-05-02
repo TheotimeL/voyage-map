@@ -16,6 +16,7 @@ from services.itinerary import coalesce_consecutive_stops, stops_overlap, valida
 from services.lookup import get_itinerary_day_or_404, get_map_or_404
 from services.models import ItineraryDay, Point
 from services.schemas import ItineraryDayIn, ItineraryDayOut, ItineraryDayPatch
+from services.storage import delete_image, extract_upload_urls
 
 router = APIRouter(prefix="/maps/{slug}/itinerary", tags=["itinerary"])
 
@@ -68,6 +69,7 @@ def add_days_bulk(
 def update_day(slug: str, day_id: int, payload: ItineraryDayPatch, db: Session = Depends(get_db)):
     m = get_map_or_404(db, slug)
     d = get_itinerary_day_or_404(db, m.id, day_id)
+    old_notes = d.notes
     fields = payload.model_dump(exclude_unset=True)
     new_start = fields.get("date", d.date)
     new_end = fields.get("end_date", d.end_date)
@@ -82,6 +84,11 @@ def update_day(slug: str, day_id: int, payload: ItineraryDayPatch, db: Session =
         setattr(d, k, v)
     db.commit()
     db.refresh(d)
+    # GC: delete any upload images no longer referenced in notes.
+    old_urls = extract_upload_urls(old_notes)
+    new_urls = extract_upload_urls(d.notes)
+    for url in old_urls - new_urls:
+        delete_image(url)
     return d
 
 
@@ -89,6 +96,9 @@ def update_day(slug: str, day_id: int, payload: ItineraryDayPatch, db: Session =
 def delete_day(slug: str, day_id: int, db: Session = Depends(get_db)):
     m = get_map_or_404(db, slug)
     d = get_itinerary_day_or_404(db, m.id, day_id)
+    # GC: delete all upload images referenced in notes before removing the row.
+    for url in extract_upload_urls(d.notes):
+        delete_image(url)
     # SQLite's ON DELETE SET NULL won't fire (foreign_keys pragma is off), so
     # detach attached points manually before removing the row.
     db.query(Point).filter(Point.itinerary_day_id == d.id).update(
