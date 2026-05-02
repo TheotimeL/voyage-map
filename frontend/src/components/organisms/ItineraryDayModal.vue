@@ -81,7 +81,7 @@
 <script setup>
 import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, ref } from 'vue'
 import { formatLat, formatLng, openInMaps } from '@/util.js'
-import GeocoderSearch from './GeocoderSearch.vue'
+import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 
 const props = defineProps({
   modelValue: { type: Object, required: true },

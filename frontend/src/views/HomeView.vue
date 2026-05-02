@@ -108,8 +108,8 @@ import L from 'leaflet'
 import { api } from '@/api.js'
 import { getMyLocation } from '@/util.js'
 import { recentMaps, rememberMap, forgetMap } from '@/lib/recents.js'
-import CompassRose from '@/components/CompassRose.vue'
-import GeocoderSearch from '@/components/GeocoderSearch.vue'
+import CompassRose from '@/components/atoms/CompassRose.vue'
+import GeocoderSearch from '@/components/molecules/GeocoderSearch.vue'
 
 const route = useRoute()
 const router = useRouter()

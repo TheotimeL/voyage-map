@@ -299,8 +299,8 @@ import { CATEGORIES, formatLat, formatLng, parseGPX, todayISO } from '@/util.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { fmtMinutes, routeLeg } from '@/lib/routing.js'
 import { reverseGeocode } from '@/api.js'
-import GeocoderSearch from './GeocoderSearch.vue'
-import CategoryFilters from './CategoryFilters.vue'
+import GeocoderSearch from '../molecules/GeocoderSearch.vue'
+import CategoryFilters from '../molecules/CategoryFilters.vue'
 import DayAddPinPopover from './DayAddPinPopover.vue'
 
 const props = defineProps({

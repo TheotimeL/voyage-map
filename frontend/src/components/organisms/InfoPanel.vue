@@ -20,9 +20,9 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
-import DesktopDock from './DesktopDock.vue'
-import MobileSheet from './MobileSheet.vue'
-import TabBar from './TabBar.vue'
+import DesktopDock from '../atoms/DesktopDock.vue'
+import MobileSheet from '../molecules/MobileSheet.vue'
+import TabBar from '../atoms/TabBar.vue'
 
 const props = defineProps({
   tabs: { type: Array, required: true },
