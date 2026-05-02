@@ -230,6 +230,28 @@ input[type="range"]::-moz-range-thumb {
   transition: transform 140ms ease, box-shadow 140ms ease;
 }
 
+/* Photo-pin: circular thumbnail with a coloured ring */
+.pin-photo-wrap {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 3px solid var(--ring);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  background: #fff;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.pin-photo-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pin-wrapper.pin-photo:hover .pin-photo-wrap {
+  transform: scale(1.08);
+  transition: transform 0.15s;
+}
+
 /* Itinerary day marker — small numbered chip */
 .iti-pin {
   width: 30px;

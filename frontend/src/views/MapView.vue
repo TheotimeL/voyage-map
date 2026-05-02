@@ -306,7 +306,7 @@ import SunCalc from 'suncalc'
 import { formatTime, arrivalSafety } from '@/lib/sun.js'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
-import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX, markdownExcerpt } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX, markdownExcerpt, extractMarkerThumb } from '@/util.js'
 import { geocode, categoryFromOSM, reverseGeocode } from '@/api.js'
 import Itinerary from '@/components/organisms/Itinerary.vue'
 import PointList from '@/components/molecules/PointList.vue'
@@ -1274,13 +1274,32 @@ function makePinIcon(glyph, extra = '') {
   })
 }
 
+function makePhotoPinIcon(thumbUrl, ringColor, extra = '') {
+  return L.divIcon({
+    className: `pin-wrapper pin-photo ${extra}`,
+    // onerror → if the thumb 404s, fall back to a default emoji span
+    html: `<div class="pin pin-photo-wrap" style="--ring:${ringColor}">
+             <img src="${thumbUrl}" loading="lazy"
+                  onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📍'}))"
+                  alt="" />
+           </div>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+  })
+}
+
 function addPointMarker(p) {
   // "maybe" pins render dimmer + thinner ring so the high-priority ("must")
   // pins read as the primary signal on a dense map. Legacy pins (priority
   // null) use the default styling.
   const extra = p.priority === 'maybe' ? 'is-maybe' : ''
+  const photo = extractMarkerThumb(p.comment)
+  const ring = p.color || 'var(--ink, #2a241a)'
+  const icon = photo
+    ? makePhotoPinIcon(photo.thumb_url, ring, extra)
+    : makePinIcon(emojiByCategory[p.category] || '📍', extra)
   const m = L.marker([p.lat, p.lng], {
-    icon: makePinIcon(emojiByCategory[p.category] || '📍', extra),
+    icon,
     opacity: p.priority === 'maybe' ? 0.6 : 1,
   })
   // Stash on the marker so re-styles after edits know what to compare against.
