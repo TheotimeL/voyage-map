@@ -181,6 +181,19 @@ function biasToViewbox(bias) {
   return null
 }
 
+// Upload an image file to the backend. Returns { url, thumb_url }.
+// Uses raw fetch (not `request`) because the body is multipart, not JSON.
+export async function uploadImage(file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  const res = await fetch('/api/uploads/image', { method: 'POST', body: fd })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`Upload failed (${res.status})${detail ? `: ${detail}` : ''}`)
+  }
+  return res.json() // { url, thumb_url }
+}
+
 // Map an OSM class/type pair to one of our pin categories. Returns null when
 // nothing fits (callers default to 'note').
 const OSM_CATEGORY_RULES = [
