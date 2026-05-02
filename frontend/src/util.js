@@ -119,3 +119,30 @@ export function getMyLocation(opts = {}) {
     )
   })
 }
+
+// First /uploads/ image inline in a markdown note. The thumb URL follows the
+// `<name>_thumb.<ext>` convention created by services/storage.py — derived
+// instead of stored so we have one source of truth (the markdown).
+export function extractMarkerThumb(markdown) {
+  if (!markdown) return null
+  const m = markdown.match(/!\[[^\]]*\]\((\/uploads\/[^)\s]+)\)/)
+  if (!m) return null
+  const fullUrl = m[1]
+  const thumbUrl = fullUrl.replace(/(\.[^.]+)$/, '_thumb$1')
+  return { full_url: fullUrl, thumb_url: thumbUrl }
+}
+
+// One-line plain-text preview for compact UI (the today-banner). Strips
+// markdown formatting *crudely* — we don't need a real parser for a banner
+// snippet, and pulling markdown-it into util.js would bloat early bundles.
+export function markdownExcerpt(markdown, maxLen = 120) {
+  if (!markdown) return ''
+  const stripped = markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')        // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')     // links → keep label
+    .replace(/[*_`#>~]+/g, '')                    // emphasis / headings / code
+    .replace(/\n+/g, ' ')                         // collapse newlines
+    .replace(/[ \t]{3,}/g, '  ')                  // collapse 3+ spaces to two
+    .trim()
+  return stripped.length > maxLen ? stripped.slice(0, maxLen).trimEnd() + '…' : stripped
+}
