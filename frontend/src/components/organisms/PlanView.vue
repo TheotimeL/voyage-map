@@ -217,7 +217,21 @@
               </td>
               <td class="c-act">
                 <div class="row-actions">
-                  <button class="iti-icon" type="button" :title="`Remove this stop`" @click="emit('delete-day', r.day)">×</button>
+                  <button
+                    v-if="pendingDeleteId !== r.day.id"
+                    class="iti-icon"
+                    type="button"
+                    title="Remove this stop"
+                    aria-label="Remove this stop"
+                    @click="armDelete(r.day)"
+                  >×</button>
+                  <button
+                    v-else
+                    class="iti-icon iti-icon-confirm mono"
+                    type="button"
+                    title="Click again to confirm — there's a 5 second undo afterwards"
+                    @click="confirmDelete(r.day)"
+                  >Delete?</button>
                 </div>
               </td>
             </tr>
@@ -318,6 +332,26 @@ const emit = defineEmits([
 
 const titleDraft = ref(props.title || '')
 watch(() => props.title, (v) => { titleDraft.value = v || '' })
+
+// Two-tap stop delete: first click on × turns the button into a "Delete?"
+// confirm pill; a second click within ~4s commits (which then runs through
+// MapView's 5s soft-delete toast for a final undo). Without the confirm
+// step a single misclick on a tightly-packed row was wiping notes/pins.
+const pendingDeleteId = ref(null)
+let _pendingDeleteTimer = null
+function armDelete(day) {
+  if (_pendingDeleteTimer) clearTimeout(_pendingDeleteTimer)
+  pendingDeleteId.value = day.id
+  _pendingDeleteTimer = setTimeout(() => {
+    pendingDeleteId.value = null
+    _pendingDeleteTimer = null
+  }, 4000)
+}
+function confirmDelete(day) {
+  if (_pendingDeleteTimer) { clearTimeout(_pendingDeleteTimer); _pendingDeleteTimer = null }
+  pendingDeleteId.value = null
+  emit('delete-day', day)
+}
 
 const today = computed(() => todayISO())
 const emojiByCategory = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.emoji]))
@@ -1103,6 +1137,24 @@ function trailStats(p) {
   border-radius: 3px;
 }
 .iti-icon:hover { color: var(--vermillion); background: var(--paper); }
+.iti-icon-confirm {
+  /* Armed state — vermillion fill + uppercase mono so the user reads it as
+     "this is the destructive click" before committing. Auto-reverts after
+     ~4s (handled in script) if they walk away. */
+  background: var(--vermillion);
+  color: var(--paper);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.55rem;
+  font-weight: 700;
+  animation: iti-confirm-pulse 1.4s ease-in-out infinite;
+}
+.iti-icon-confirm:hover { background: var(--vermillion-deep); color: var(--paper); }
+@keyframes iti-confirm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 93, 60, 0.45); }
+  50%      { box-shadow: 0 0 0 4px rgba(232, 93, 60, 0); }
+}
 
 .plan-pins { display: grid; gap: 0.6rem; }
 .plan-pins-controls { display: flex; gap: 0.4rem; align-items: center; }
