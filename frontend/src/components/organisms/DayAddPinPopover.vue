@@ -74,7 +74,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { CATEGORIES } from '@/util.js'
-import GeocoderSearch from './GeocoderSearch.vue'
+import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 
 const props = defineProps({
   day: { type: Object, required: true },

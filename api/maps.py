@@ -4,18 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from services.db import get_db
+from services.lookup import get_map_or_404
 from services.models import Map
 from services.schemas import MapIn, MapOut, MapPatch
 from services.slug import make_slug
 
 router = APIRouter(prefix="/maps", tags=["maps"])
-
-
-def _get_or_404(db: Session, slug: str) -> Map:
-    m = db.query(Map).filter(Map.slug == slug).first()
-    if m is None:
-        raise HTTPException(404, "Map not found")
-    return m
 
 
 @router.post("", response_model=MapOut, status_code=201)
@@ -43,12 +37,12 @@ def create_map(payload: MapIn, db: Session = Depends(get_db)):
 
 @router.get("/{slug}", response_model=MapOut)
 def get_map(slug: str, db: Session = Depends(get_db)):
-    return _get_or_404(db, slug)
+    return get_map_or_404(db, slug)
 
 
 @router.patch("/{slug}", response_model=MapOut)
 def update_map(slug: str, payload: MapPatch, db: Session = Depends(get_db)):
-    m = _get_or_404(db, slug)
+    m = get_map_or_404(db, slug)
     data = payload.model_dump(exclude_unset=True)
     for k, v in data.items():
         setattr(m, k, v)
