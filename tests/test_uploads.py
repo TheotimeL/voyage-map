@@ -59,3 +59,24 @@ def test_post_rejects_undecodable_bytes(client, uploads_dir):
     files = {"file": ("fake.jpg", b"not a real jpeg", "image/jpeg")}
     r = client.post("/api/uploads/image", files=files)
     assert r.status_code == 400
+
+
+def test_post_accepts_heic_upload(client, uploads_dir):
+    """HEIC is the iPhone photo format — pillow-heif must decode it."""
+    import io as _io
+
+    from pillow_heif import from_pillow
+
+    # Synthesize a small HEIC by wrapping a Pillow image with pillow-heif.
+    src = Image.new("RGB", (200, 150), color="green")
+    buf = _io.BytesIO()
+    from_pillow(src).save(buf, format="HEIF")
+    heic_bytes = buf.getvalue()
+
+    files = {"file": ("photo.heic", heic_bytes, "image/heic")}
+    r = client.post("/api/uploads/image", files=files)
+    assert r.status_code == 200, f"unexpected: {r.status_code} {r.text}"
+    body = r.json()
+    assert body["url"].startswith("/uploads/")
+    # Output is normalized to JPEG (we re-encode in save_image).
+    assert body["url"].endswith(".jpg")

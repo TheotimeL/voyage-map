@@ -86,10 +86,12 @@ app.include_router(route_router, prefix="/api")
 try:
     storage.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/uploads", StaticFiles(directory=str(storage.UPLOADS_DIR)), name="uploads")
-except OSError:
-    # In test environments the default UPLOADS_DIR path (/data/uploads) may not
-    # be writable; the directory is monkeypatched per-test, so skip the mount.
-    pass
+except OSError as exc:
+    # In test environments the default UPLOADS_DIR (/data/uploads) is not
+    # writable; the per-test monkeypatch makes the mount unnecessary anyway.
+    # In production this means uploads will return URLs that 404 — so we log
+    # loud enough to be noticed in Render's log stream.
+    logger.warning("Could not mount /uploads static dir: %s", exc)
 app.include_router(uploads_router, prefix="/api")
 
 
