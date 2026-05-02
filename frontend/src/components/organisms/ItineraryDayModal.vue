@@ -32,39 +32,7 @@
       <p class="hint mono">After saving, drag the day's pin on the map to fine-tune.</p>
 
       <label class="lbl">Notes</label>
-      <textarea
-        v-model="form.notes"
-        class="field"
-        maxlength="500"
-        rows="3"
-        placeholder="Hotel, plan, anything to remember"
-      />
-
-      <label class="lbl">Photos</label>
-      <div class="photos">
-        <ul v-if="photoUrls.length" class="photo-grid">
-          <li v-for="(url, i) in photoUrls" :key="i" class="photo-cell">
-            <img :src="url" alt="" />
-            <button
-              type="button"
-              class="photo-rm"
-              :title="`Remove photo ${i + 1}`"
-              @click="removePhoto(i)"
-            >×</button>
-          </li>
-        </ul>
-        <label class="photo-add">
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            class="hidden"
-            @change="onPhotoPick"
-          />
-          <span>＋ Add photo{{ photoUrls.length ? 's' : '' }}</span>
-        </label>
-        <p v-if="photoError" class="error sm">{{ photoError }}</p>
-      </div>
+      <MarkdownEditor v-model="form.notes" placeholder="Plans, journal, photos…" />
 
       <button v-if="hasCoord" type="button" class="btn directions" @click="onDirections">
         Directions →
@@ -79,9 +47,10 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, ref } from 'vue'
+import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch } from 'vue'
 import { formatLat, formatLng, openInMaps } from '@/util.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
+import MarkdownEditor from '@/components/molecules/MarkdownEditor.vue'
 
 const props = defineProps({
   modelValue: { type: Object, required: true },
@@ -99,70 +68,6 @@ const form = reactive({
   lng: props.modelValue.lng ?? null,
 })
 
-// Photos: stored as a JSON array of base64 data-URLs in `photos`. Hydrate on
-// open, edit in-place, serialize back on save. Per-image cap (~600 px wide,
-// JPEG) keeps row sizes reasonable on a phone-first trip journal.
-const photoUrls = ref([])
-const photoError = ref('')
-function hydratePhotos() {
-  if (!props.modelValue.photos) { photoUrls.value = []; return }
-  try {
-    const parsed = JSON.parse(props.modelValue.photos)
-    photoUrls.value = Array.isArray(parsed) ? parsed.filter((u) => typeof u === 'string') : []
-  } catch {
-    photoUrls.value = []
-  }
-}
-hydratePhotos()
-
-const MAX_PHOTOS = 12
-const MAX_DIM = 1280
-async function onPhotoPick(e) {
-  photoError.value = ''
-  const files = Array.from(e.target.files || []).filter((f) => /^image\//.test(f.type))
-  e.target.value = ''
-  for (const f of files) {
-    if (photoUrls.value.length >= MAX_PHOTOS) {
-      photoError.value = `Max ${MAX_PHOTOS} photos per stop — remove one to add more.`
-      break
-    }
-    try {
-      const url = await downscaleToDataUrl(f, MAX_DIM)
-      photoUrls.value = [...photoUrls.value, url]
-    } catch (err) {
-      photoError.value = err.message || 'Could not read that image.'
-    }
-  }
-}
-function removePhoto(i) {
-  photoUrls.value = photoUrls.value.filter((_, j) => j !== i)
-}
-
-// Downscale via canvas before base64-encoding. Without this a single 4K phone
-// shot would balloon row size to many MB and slow every map load.
-function downscaleToDataUrl(file, maxDim) {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('Could not read file'))
-    reader.onload = () => {
-      img.onerror = () => reject(new Error('Image decode failed'))
-      img.onload = () => {
-        const ratio = Math.min(1, maxDim / Math.max(img.width, img.height))
-        const w = Math.round(img.width * ratio)
-        const h = Math.round(img.height * ratio)
-        const canvas = document.createElement('canvas')
-        canvas.width = w
-        canvas.height = h
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, w, h)
-        resolve(canvas.toDataURL('image/jpeg', 0.82))
-      }
-      img.src = reader.result
-    }
-    reader.readAsDataURL(file)
-  })
-}
 const hasCoord = computed(() => form.lat != null && form.lng != null)
 // Nights at this stop = end - start (no +1). May 9 → May 10 is 1 night,
 // not 2 — the trip-day count and the nights count are different things.
@@ -211,10 +116,6 @@ function submit() {
     notes: form.notes.trim() || null,
     lat: form.lat,
     lng: form.lng,
-    // Send empty array as null so the row stays compact when the user clears
-    // every photo. JSON.stringify handles escaping; consumers can JSON.parse
-    // back on read (Itinerary chip + viewer).
-    photos: photoUrls.value.length ? JSON.stringify(photoUrls.value) : null,
   })
 }
 </script>
@@ -276,62 +177,4 @@ function submit() {
   margin-top: 0.5rem;
 }
 .hint { color: var(--ink-faded); font-size: 0.72rem; margin: 0; letter-spacing: 0.06em; }
-
-.photos { display: grid; gap: 0.4rem; }
-.photo-grid {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: 0.35rem;
-}
-.photo-cell {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid var(--cream-edge);
-}
-.photo-cell img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.photo-rm {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 1.4rem;
-  height: 1.4rem;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: var(--paper);
-  border: none;
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.photo-rm:hover { background: var(--vermillion); }
-.photo-add {
-  display: inline-block;
-  padding: 0.4rem 0.8rem;
-  border: 1px dashed var(--cream-edge);
-  border-radius: 3px;
-  background: var(--cream);
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  cursor: pointer;
-  text-align: center;
-  justify-self: start;
-}
-.photo-add:hover { color: var(--vermillion); border-color: var(--vermillion); }
-.hidden { display: none; }
-.error.sm { color: var(--vermillion-deep); font-size: 0.78rem; margin: 0; }
 </style>
