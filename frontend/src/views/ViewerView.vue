@@ -12,7 +12,7 @@
              reappears for them. No real auth — just convention. -->
         <RouterLink
           v-if="$route.query.host"
-          :to="{ name: 'map', params: { slug } }"
+          :to="{ name: 'map', params: { slug: editorSlug } }"
           class="viewer-edit mono"
         >Open editor →</RouterLink>
       </div>
@@ -49,14 +49,26 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
+import { useRouter } from 'vue-router'
 import { api } from '@/api.js'
 import { CATEGORIES, parseGPX, trackColor } from '@/util.js'
 import { buildTipNode } from '@/lib/tooltip.js'
 import { routeLeg } from '@/lib/routing.js'
+import { extractId, buildMapSlug } from '@/lib/slug.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
 })
+// See MapView for the full rationale: route param may be either a bare id
+// (legacy share links) or "name-slug-{id}" — the canonical id is what the
+// API expects.
+const slug = computed(() => extractId(props.slug))
+const router = useRouter()
+
+// Editor link reuses the readable form once we've loaded the title.
+const editorSlug = computed(() => mapData.value
+  ? buildMapSlug({ title: mapData.value.title, slug: slug.value })
+  : props.slug)
 
 const mapData = ref(null)
 const loading = ref(true)
@@ -113,6 +125,14 @@ const stopRows = computed(() => {
   })
 })
 
+function syncUrlSlug(m) {
+  const desired = buildMapSlug({ title: m.title, slug: m.slug })
+  if (!desired || desired === props.slug) return
+  const current = router.currentRoute.value
+  if (current.name !== 'viewer') return
+  router.replace({ name: 'viewer', params: { slug: desired }, query: current.query, hash: current.hash })
+}
+
 function formatDateRange(d) {
   if (!d.end_date || d.end_date === d.date) return d.date
   return `${d.date} → ${d.end_date}`
@@ -127,9 +147,10 @@ onMounted(async () => {
   try {
     // Reuse the snapshot-first loader so the viewer is fast on repeat visits
     // and works fully offline once cached.
-    const { cached, refresh } = await api.getMapWithSnapshot(props.slug)
+    const { cached, refresh } = await api.getMapWithSnapshot(slug.value)
     if (cached) {
       mapData.value = cached
+      syncUrlSlug(cached)
       loading.value = false
       await nextTick()
       initLeaflet()
@@ -137,6 +158,7 @@ onMounted(async () => {
     const fresh = await refresh.catch(() => null)
     if (fresh) {
       mapData.value = fresh
+      syncUrlSlug(fresh)
       if (!cached) {
         loading.value = false
         await nextTick()

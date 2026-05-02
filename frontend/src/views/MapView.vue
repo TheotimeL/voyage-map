@@ -151,6 +151,7 @@
           class="map-topleft-title"
           placeholder="Untitled voyage"
           maxlength="120"
+          :title="titleDraft || 'Untitled voyage'"
           @blur="commitTitle"
           @keydown.enter="$event.target.blur()"
         />
@@ -180,6 +181,15 @@
       <div v-if="pendingDelete" class="del-toast" role="status" aria-live="polite">
         <span class="del-toast-text">{{ pendingDelete.message }}</span>
         <button type="button" class="del-toast-undo mono" @click="undoDelete">Undo</button>
+      </div>
+    </Transition>
+
+    <!-- Share-copy confirmation. The ↗→✓ icon swap on the button is easy to
+         miss, so a small toast restates "Read-only link copied" near the
+         topbar for the same 1.8s window the icon stays flipped. -->
+    <Transition name="toast">
+      <div v-if="copied" class="share-toast mono" role="status" aria-live="polite">
+        ✓ Read-only link copied
       </div>
     </Transition>
 
@@ -289,18 +299,25 @@ import TripRibbon from '@/components/molecules/TripRibbon.vue'
 import PlanView from '@/components/organisms/PlanView.vue'
 import PasteImportModal from '@/components/organisms/PasteImportModal.vue'
 import ModeToggleControl from '@/components/atoms/ModeToggleControl.vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap, updateRecentStats } from '@/lib/recents.js'
 import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 import { writeSnapshot } from '@/lib/snapshot.js'
+import { extractId, buildMapSlug } from '@/lib/slug.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
 import { buildTipNode } from '@/lib/tooltip.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
 })
+
+// `slug.value` is the raw route param — may be either the canonical 8-char
+// id (legacy URLs) or "name-slug-{id}" (the new readable format). Every
+// API call, storage key, and recents lookup wants the canonical id; only
+// the share URL wants a display-friendly form.
+const slug = computed(() => extractId(slug.value))
 
 const mapData = ref(null)
 const loading = ref(true)
@@ -312,7 +329,7 @@ const dockCollapsed = ref(false)
 // View mode: 'plan' (full-page editable planner — table of stops + pin grid)
 // or 'map' (map-first, no left dock on desktop). Persisted per slug because a
 // trip in active travel wants Map by default; a trip being prepared wants Plan.
-const modeStorageKey = computed(() => `voyage-mode:${props.slug}`)
+const modeStorageKey = computed(() => `voyage-mode:${slug.value}`)
 const mode = ref('plan')
 onMounted(() => {
   const saved = localStorage.getItem(modeStorageKey.value)
@@ -572,7 +589,7 @@ watch(
   (next) => {
     if (!next || !mapData.value) return
     const trails = (mapData.value.points || []).filter((p) => p.category === 'trail').length
-    updateRecentStats(props.slug, {
+    updateRecentStats(slug.value, {
       points: (mapData.value.points || []).length - trails,
       trails,
       days: tripDaysOf(mapData.value.itinerary),
@@ -586,7 +603,7 @@ watch(
 // disturb the UI.
 watch(
   () => mapData.value,
-  (next) => { if (next) writeSnapshot(props.slug, next) },
+  (next) => { if (next) writeSnapshot(slug.value, next) },
   { deep: true },
 )
 
@@ -701,11 +718,28 @@ function adoptMap(m, { fromSnapshot = false } = {}) {
     },
     { lastCenter: { lat: m.center_lat, lng: m.center_lng } },
   )
+  // Upgrade legacy `/m/{id}` URLs to the readable `/m/{name-slug}-{id}` form
+  // once we know the title. router.replace keeps history clean and doesn't
+  // remount the view (the :slug param value is the id-equivalent, so route
+  // resolution + loaded data don't change).
+  syncUrlSlug(m)
+}
+
+const router = useRouter()
+function syncUrlSlug(m) {
+  const desired = buildMapSlug({ title: m.title, slug: m.slug })
+  if (!desired || desired === props.slug) return
+  const current = router.currentRoute.value
+  // Only upgrade `/m/...` and `/v/...` routes — never push the user from
+  // viewer to host or vice versa. Skip if a different route is active (the
+  // user navigated mid-load).
+  if (current.name !== 'map' && current.name !== 'viewer') return
+  router.replace({ name: current.name, params: { slug: desired }, query: current.query, hash: current.hash })
 }
 
 onMounted(async () => {
   try {
-    const { cached, refresh } = await api.getMapWithSnapshot(props.slug)
+    const { cached, refresh } = await api.getMapWithSnapshot(slug.value)
 
     // Render the snapshot immediately when we have one — this is the whole
     // point of the IndexedDB layer: cold-start in the van takes ~0ms instead
@@ -848,7 +882,7 @@ function renderItinerary() {
     m.on('dragend', async (e) => {
       const ll = e.target.getLatLng()
       try {
-        const updated = await api.patchItineraryDay(props.slug, d.id, { lat: ll.lat, lng: ll.lng })
+        const updated = await api.patchItineraryDay(slug.value, d.id, { lat: ll.lat, lng: ll.lng })
         const idx = (mapData.value.itinerary || []).findIndex((x) => x.id === d.id)
         if (idx >= 0) {
           mapData.value.itinerary[idx] = { ...mapData.value.itinerary[idx], ...updated }
@@ -1135,7 +1169,7 @@ async function onDeleteDetail() {
     message: `Pin "${point.title || 'untitled'}" deleted`,
     hide: () => removePointMarker(point.id),
     restore: () => addPointMarker(point),
-    commit: () => api.deletePoint(props.slug, point.id),
+    commit: () => api.deletePoint(slug.value, point.id),
     onCommit: () => {
       mapData.value.points = mapData.value.points.filter((p) => p.id !== point.id)
     },
@@ -1311,7 +1345,7 @@ async function importGpxFile(file) {
     const { coords, name } = parseGPX(text) // validate before POST
     const idx = trailPoints.value.length
     const [lat, lng] = coords[0]
-    const created = await api.addPoint(props.slug, {
+    const created = await api.addPoint(slug.value, {
       lat,
       lng,
       title: name || file.name.replace(/\.gpx$/i, ''),
@@ -1521,7 +1555,7 @@ watch(() => todayBanner.value?.day, (d) => { ensurePlaceName(d) }, { immediate: 
 // Banner dismissal — sticky for the session, keyed per voyage slug. The user
 // can re-open by reloading. Avoids the banner being a permanent strip eating
 // 40px on every tab switch.
-const bannerDismissKey = computed(() => `voyage-banner-dismissed:${props.slug}`)
+const bannerDismissKey = computed(() => `voyage-banner-dismissed:${slug.value}`)
 const bannerDismissed = ref(false)
 onMounted(() => {
   bannerDismissed.value = sessionStorage.getItem(bannerDismissKey.value) === '1'
@@ -1544,7 +1578,7 @@ watch(
 
 async function onAddDay(payload) {
   try {
-    const day = await api.addItineraryDay(props.slug, payload)
+    const day = await api.addItineraryDay(slug.value, payload)
     if (!mapData.value.itinerary) mapData.value.itinerary = []
     mapData.value.itinerary = [...mapData.value.itinerary, day].sort((a, b) => a.date.localeCompare(b.date))
   } catch (e) { error.value = e.message }
@@ -1573,7 +1607,7 @@ async function onAddTrailPin(t) {
     if (t.coords && t.coords.length > 1) {
       payload.gpx_data = coordsToGPX(t.coords, t.name)
     }
-    const created = await api.addPoint(props.slug, payload)
+    const created = await api.addPoint(slug.value, payload)
     mapData.value.points.push(created)
     if (created.gpx_data) {
       const line = renderTrack(created, idx)
@@ -1614,7 +1648,7 @@ async function onAddDaysBulk(payload) {
   const replace = Array.isArray(payload) ? false : !!payload?.replace
   if (!rows?.length) return
   try {
-    const created = await api.addItineraryDaysBulk(props.slug, rows, { replace })
+    const created = await api.addItineraryDaysBulk(slug.value, rows, { replace })
     if (!mapData.value.itinerary || replace) mapData.value.itinerary = []
     mapData.value.itinerary = [...mapData.value.itinerary, ...created].sort((a, b) => a.date.localeCompare(b.date))
     // Re-fit the map so the user sees their newly imported trip.
@@ -1640,7 +1674,7 @@ async function onDeleteDay(day) {
       mapData.value.itinerary = [...mapData.value.itinerary, snapshot]
         .sort((a, b) => a.date.localeCompare(b.date))
     },
-    commit: () => api.deleteItineraryDay(props.slug, day.id),
+    commit: () => api.deleteItineraryDay(slug.value, day.id),
     onCommit: () => { /* hide() already removed it from local state */ },
   })
 }
@@ -1653,7 +1687,7 @@ async function onDetachPoint(pointId) {
 }
 async function patchPointDay(pointId, dayId) {
   try {
-    const updated = await api.patchPoint(props.slug, pointId, { itinerary_day_id: dayId })
+    const updated = await api.patchPoint(slug.value, pointId, { itinerary_day_id: dayId })
     const idx = mapData.value.points.findIndex((p) => p.id === pointId)
     if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
   } catch (e) { error.value = e.message }
@@ -1661,7 +1695,7 @@ async function patchPointDay(pointId, dayId) {
 
 async function onPatchDay(day, payload) {
   try {
-    const updated = await api.patchItineraryDay(props.slug, day.id, payload)
+    const updated = await api.patchItineraryDay(slug.value, day.id, payload)
     const idx = (mapData.value.itinerary || []).findIndex((d) => d.id === day.id)
     if (idx >= 0) {
       mapData.value.itinerary[idx] = { ...mapData.value.itinerary[idx], ...updated }
@@ -1702,7 +1736,7 @@ async function onGoDay(day) {
 
 async function pickCandidate(day, choice) {
   try {
-    const updated = await api.patchItineraryDay(props.slug, day.id, { lat: choice.lat, lng: choice.lng })
+    const updated = await api.patchItineraryDay(slug.value, day.id, { lat: choice.lat, lng: choice.lng })
     const idx = mapData.value.itinerary.findIndex((d) => d.id === day.id)
     if (idx >= 0) mapData.value.itinerary.splice(idx, 1, updated)
     leaflet.flyTo([choice.lat, choice.lng], 11, { duration: 0.6 })
@@ -1799,7 +1833,7 @@ async function onSave(payload) {
   if (!modal.value) return
   try {
     if (modal.value.id) {
-      const updated = await api.patchPoint(props.slug, modal.value.id, payload)
+      const updated = await api.patchPoint(slug.value, modal.value.id, payload)
       const idx = mapData.value.points.findIndex((p) => p.id === updated.id)
       if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
       removePointMarker(updated.id)
@@ -1808,7 +1842,7 @@ async function onSave(payload) {
       detail.value = { ...updated }
       activeId.value = updated.id
     } else {
-      const created = await api.addPoint(props.slug, {
+      const created = await api.addPoint(slug.value, {
         ...payload,
         lat: modal.value.lat,
         lng: modal.value.lng,
@@ -1828,7 +1862,7 @@ async function commitTitle() {
   const t = titleDraft.value.trim() || null
   if (t === (mapData.value.title || null)) return
   try {
-    mapData.value = await api.patchMap(props.slug, { title: t })
+    mapData.value = await api.patchMap(slug.value, { title: t })
   } catch {
     titleDraft.value = mapData.value.title || ''
   }
@@ -1847,7 +1881,7 @@ async function onTitleSave(next) {
 // the new chip on its row, which is the affordance the user is looking at.
 async function onAddPinToDay({ dayId, lat, lng, title, category }) {
   try {
-    const created = await api.addPoint(props.slug, {
+    const created = await api.addPoint(slug.value, {
       lat, lng,
       title: title || null,
       category: category || 'note',
@@ -1875,7 +1909,7 @@ function onDeletePinFromList(point) {
     message: `Pin "${point.title || 'untitled'}" deleted`,
     hide: () => removePointMarker(point.id),
     restore: () => addPointMarker(point),
-    commit: () => api.deletePoint(props.slug, point.id),
+    commit: () => api.deletePoint(slug.value, point.id),
     onCommit: () => {
       mapData.value.points = mapData.value.points.filter((p) => p.id !== point.id)
     },
@@ -1924,8 +1958,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClickTools, tru
 
 // Share URL: `/v/{slug}` is the read-only mirror; copying that instead of
 // `/m/{slug}` means the recipient can't accidentally edit the host's trip.
+// We share the display slug (name-slug + id) when the trip is titled so the
+// link is human-readable; the viewer route resolves either form.
 function copyShareUrl() {
-  const url = `${window.location.origin}/v/${props.slug}`
+  const display = mapData.value
+    ? buildMapSlug({ title: mapData.value.title, slug: slug.value })
+    : slug.value
+  const url = `${window.location.origin}/v/${display}`
   navigator.clipboard.writeText(url)
   copied.value = true
   setTimeout(() => (copied.value = false), 1800)
@@ -2048,7 +2087,9 @@ onBeforeUnmount(() => {
   border: 1.5px solid var(--ink);
   border-radius: 999px;
   box-shadow: 0 3px 0 var(--ink), 0 6px 14px rgba(0, 0, 0, 0.12);
-  max-width: 22rem;
+  /* Pill grows with the title rather than chopping it; the cap stays well
+     short of the topbar pill on the right (which sits at right: 12px). */
+  max-width: min(38rem, calc(50vw - 1.5rem));
 }
 .map-topleft-title {
   background: transparent;
@@ -2058,9 +2099,16 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--ink);
-  width: 14rem;
+  /* Width follows content up to the pill's max-width. min-width keeps the
+     placeholder readable when the trip is untitled; text-overflow ellipsises
+     overflow rather than scroll-clipping mid-token. The native title attribute
+     surfaces the full string on hover. */
+  min-width: 8rem;
+  width: 100%;
+  max-width: 100%;
   padding: 0.05rem 0.1rem;
   border-bottom: 1px dashed transparent;
+  text-overflow: ellipsis;
 }
 .map-topleft-title:focus { outline: none; border-bottom-color: var(--ink-faded); }
 .map-topleft-title:hover { border-bottom-color: var(--cream-edge); }
@@ -2070,7 +2118,7 @@ onBeforeUnmount(() => {
     left: 8px;
     padding: 0.25rem 0.5rem;
   }
-  .map-topleft-title { width: 11rem; font-size: 0.85rem; }
+  .map-topleft-title { min-width: 7rem; font-size: 0.85rem; }
   /* When the ribbon is present it carries the trip identity (numbered chips
      of every stop) — the title pill becomes redundant and visibly collides
      with the topbar pill on the right, so we hide it. The user can still
@@ -2517,7 +2565,29 @@ onBeforeUnmount(() => {
   overflow: hidden;
   max-width: 100%;
 }
-.banner-row-meta { gap: 0.7rem; }
+/* Meta row (weather / sun / next-leg / notes) wraps onto multiple lines when
+   the banner can't fit them inline, instead of ellipsising mid-token (which
+   produced output like "31° / ... * 04:49 → 1…"). Each child still keeps
+   its own `nowrap` so individual values aren't broken across lines. */
+.banner-row-meta {
+  flex-wrap: wrap;
+  gap: 0.25rem 0.7rem;
+  white-space: normal;
+  overflow: visible;
+}
+.banner-row-meta > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+@media (max-width: 560px) {
+  /* Phones: drop the lower-priority "next leg" and free-form notes from the
+     meta row so the temperature/sun pair has room to breathe. The banner is
+     a glance affordance; the user can tap through for the full day card. */
+  .banner-next,
+  .banner-notes { display: none; }
+}
 .banner-actions { display: inline-flex; }
 .banner-action,
 .banner-close,
@@ -2664,6 +2734,35 @@ onBeforeUnmount(() => {
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
   transform: translate(-50%, 8px);
+}
+
+/* Share-copy toast — anchored under the top-right toolbar so it appears
+   right where the ↗ icon flipped to ✓. Same ink/cream palette as the
+   delete toast, scoped narrow so it can't bleed into other controls. */
+.share-toast {
+  position: absolute;
+  top: calc(96px + 2.4rem + 0.4rem);
+  right: 12px;
+  z-index: 950;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.45rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .share-toast { top: calc(64px + 2.2rem + 0.4rem); right: 8px; }
+}
+.share-toast.toast-enter-from,
+.share-toast.toast-leave-to {
+  /* Override the centred del-toast keyframes so this slides in from the
+     button (no horizontal nudge). */
+  transform: translateY(-6px);
 }
 
 </style>

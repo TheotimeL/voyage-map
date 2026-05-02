@@ -5,7 +5,9 @@
         <span class="brand-mark">●</span>
         <span class="brand-name">Voyage Map</span>
       </span>
-      <span class="brand-meta mono">№ 001 · FIELD GUIDE</span>
+      <!-- Issue stamp — pure flavour text, deliberately styled flatter than
+           the brand mark so it doesn't read as a navigation link. -->
+      <span class="brand-meta mono" aria-hidden="true">ISSUE №001 · FIELD GUIDE</span>
     </header>
 
     <section class="hero">
@@ -31,9 +33,9 @@
       <ul class="recents-list">
         <li v-for="r in recents" :key="r.slug" class="recent-card">
           <router-link
-            :to="{ name: 'map', params: { slug: r.slug } }"
+            :to="{ name: 'map', params: { slug: displaySlug(r) } }"
             class="recent-link"
-            :title="`Open /m/${r.slug}`"
+            :title="`Open /m/${displaySlug(r)}`"
           >
             <span class="recent-title">{{ r.title || 'Untitled voyage' }}</span>
             <span v-if="r.stats" class="recent-stats mono">
@@ -108,6 +110,7 @@ import L from 'leaflet'
 import { api } from '@/api.js'
 import { getMyLocation } from '@/util.js'
 import { recentMaps, rememberMap, forgetMap } from '@/lib/recents.js'
+import { buildMapSlug } from '@/lib/slug.js'
 import CompassRose from '@/components/atoms/CompassRose.vue'
 import GeocoderSearch from '@/components/molecules/GeocoderSearch.vue'
 
@@ -121,7 +124,7 @@ onMounted(() => {
   if (route.query.home != null) return
   const rs = recentMaps()
   if (rs.length === 1) {
-    router.replace({ name: 'map', params: { slug: rs[0].slug } })
+    router.replace({ name: 'map', params: { slug: buildMapSlug(rs[0]) } })
   }
 })
 const year = new Date().getFullYear()
@@ -163,9 +166,14 @@ function forget(slug) {
 }
 
 const copiedSlug = ref(null)
+function displaySlug(r) {
+  return buildMapSlug(r)
+}
 async function copyLink(slug) {
   try {
-    await navigator.clipboard.writeText(`${window.location.origin}/m/${slug}`)
+    const r = recents.value.find((x) => x.slug === slug)
+    const display = r ? buildMapSlug(r) : slug
+    await navigator.clipboard.writeText(`${window.location.origin}/m/${display}`)
     copiedSlug.value = slug
     setTimeout(() => { if (copiedSlug.value === slug) copiedSlug.value = null }, 1400)
   } catch { /* no clipboard permission */ }
@@ -242,7 +250,7 @@ async function create() {
       radius_m: 50000,
     })
     rememberMap(m.slug, m.title)
-    router.push({ name: 'map', params: { slug: m.slug } })
+    router.push({ name: 'map', params: { slug: buildMapSlug(m) } })
   } catch (e) {
     error.value = e.message || 'Could not chart your map.'
     creating.value = false
@@ -286,9 +294,16 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 .brand-meta {
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   letter-spacing: 0.22em;
-  color: var(--ink-soft);
+  color: var(--ink-faded);
+  /* Decorative label — explicitly non-interactive. The default cursor and
+     opacity push it visually behind the brand mark so it doesn't read as
+     a link the user has yet to discover. */
+  cursor: default;
+  user-select: none;
+  font-style: italic;
+  opacity: 0.85;
 }
 
 /* Hero ----------------------------------------------------------- */
