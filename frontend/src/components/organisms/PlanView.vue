@@ -55,9 +55,10 @@
         No stops yet — add the first one above.
       </div>
 
-      <table v-else class="plan-table">
+      <table v-else class="plan-table" :class="{ 'is-dragging': dragSourceId != null }">
         <thead>
           <tr>
+            <th class="c-grip" aria-hidden="true"></th>
             <th class="c-date">Date</th>
             <th class="c-day">Day</th>
             <th class="c-place">Stop</th>
@@ -68,23 +69,71 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="r in rows" :key="r.day.id">
+          <template v-for="r in rows" :key="r.key">
             <tr v-if="r.weekHeader" class="plan-week">
-              <td colspan="7">
+              <td colspan="8">
                 <span class="week-tag mono">Week {{ r.weekNum }}</span>
                 <span class="week-meta mono">{{ r.weekRange }}</span>
                 <span v-if="r.weekSummary" class="week-summary mono">{{ r.weekSummary }}</span>
               </td>
             </tr>
             <tr
-              class="plan-row"
-              :class="{ today: r.isToday, past: r.isPast, future: r.isFuture, 'is-selected': selectedDayId === r.day.id }"
+              v-if="r.isGhost"
+              class="plan-row plan-ghost"
+              :class="{ 'drop-target': dropTargetKey === r.key }"
+              @dragover.prevent="onGhostDragOver(r, $event)"
+              @dragleave="onRowDragLeave(r)"
+              @drop.prevent="onGhostDrop(r)"
             >
+              <td class="c-grip" aria-hidden="true"></td>
+              <td class="c-date">
+                <div class="date-cell ghost-date">
+                  <span class="d-dow mono">{{ r.dow }}</span>
+                  <span class="d-num">{{ r.dayNum }}</span>
+                  <span class="d-mon mono">{{ r.mon }}</span>
+                </div>
+              </td>
+              <td class="c-day mono">—</td>
+              <td class="c-place ghost-place" colspan="4">
+                <button class="ghost-add mono" type="button" @click="addStopOnDate(r.date)">
+                  + add stop on {{ r.dayNum }} {{ r.mon }}
+                </button>
+                <span class="ghost-hint mono">drop a wishlist pin to schedule it</span>
+              </td>
+              <td class="c-act"></td>
+            </tr>
+            <tr
+              v-else
+              class="plan-row"
+              :class="{
+                today: r.isToday,
+                past: r.isPast,
+                future: r.isFuture,
+                'is-selected': selectedDayId === r.day.id,
+                'is-dragged': dragSourceId === r.day.id,
+                'drop-target': dropTargetKey === r.key,
+                'is-expanded': mobileExpanded.has(r.day.id),
+              }"
+              @dragover.prevent="onRowDragOver(r, $event)"
+              @dragleave="onRowDragLeave(r)"
+              @drop.prevent="onRowDrop(r)"
+            >
+              <td class="c-grip">
+                <span
+                  class="grip"
+                  draggable="true"
+                  :title="`Drag to reorder ${r.cleanLabel || r.day.label || 'this stop'}`"
+                  aria-label="Drag to reorder"
+                  role="button"
+                  @dragstart="onRowDragStart(r, $event)"
+                  @dragend="onRowDragEnd"
+                >⋮⋮</span>
+              </td>
               <td class="c-date">
                 <label class="date-cell" :title="`Click to change start date`">
                   <input
                     type="date"
-                    class="date-cell-input"
+                    class="date-cell-input themed-date"
                     :value="r.day.date"
                     :min="firstISO"
                     :max="lastISO"
@@ -104,17 +153,24 @@
                 <input
                   v-if="endPickerFor === r.day.id"
                   type="date"
-                  class="end-picker"
+                  class="end-picker themed-date"
                   :value="r.day.end_date || r.day.date"
                   :min="r.day.date"
                   ref="endPickerEl"
                   @change="onEndDateChange(r.day, $event.target.value)"
                   @blur="endPickerFor = null"
                 />
+                <button
+                  type="button"
+                  class="mobile-expand mono"
+                  :title="mobileExpanded.has(r.day.id) ? 'Collapse' : 'Expand'"
+                  @click.stop="toggleMobileExpand(r.day.id)"
+                >{{ mobileExpanded.has(r.day.id) ? '▴' : '▾' }}</button>
               </td>
               <td class="c-day mono">{{ r.dayLabel }}</td>
               <td class="c-place">
                 <div class="place-cell">
+                  <span class="mobile-name">{{ r.cleanLabel || r.day.label || 'Untitled stop' }}</span>
                   <input
                     class="cell-input cell-name"
                     :value="r.cleanLabel || r.day.label || ''"
@@ -122,6 +178,12 @@
                     @blur="onLabelBlur(r.day, $event.target.value)"
                     @keydown.enter="$event.target.blur()"
                   />
+                  <p v-if="r.legNext" class="mobile-summary mono" aria-hidden="true">
+                    <template v-if="r.legNext.real">
+                      ↓ {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutesTight(r.legNext.real.minutes) }}
+                    </template>
+                    <template v-else>↓ ≈ {{ r.legNext.km.toLocaleString() }} km</template>
+                  </p>
                   <div class="place-loc">
                     <em
                       v-if="r.day.lat != null"
@@ -153,12 +215,23 @@
               </td>
               <td class="c-notes">
                 <input
+                  v-if="notesEditing === r.day.id"
+                  ref="notesInputEl"
                   class="cell-input cell-notes"
                   :value="r.day.notes || ''"
                   placeholder="—"
-                  @blur="onNotesBlur(r.day, $event.target.value)"
+                  @blur="onNotesBlur(r.day, $event.target.value); notesEditing = null"
                   @keydown.enter="$event.target.blur()"
+                  @keydown.escape="notesEditing = null"
                 />
+                <button
+                  v-else
+                  type="button"
+                  class="cell-notes-display"
+                  :class="{ 'is-empty': !r.day.notes, 'is-expanded': notesExpanded.has(r.day.id) }"
+                  :title="r.day.notes || 'Click to add a note'"
+                  @click="onNotesClick(r.day)"
+                >{{ r.day.notes || '—' }}</button>
               </td>
               <td class="c-pins">
                 <div class="pins-cell">
@@ -528,6 +601,115 @@ function onNotesBlur(day, value) {
   emit('patch-day', { day, payload: { notes: next || null } })
 }
 
+// Notes are read-only ellipsised text by default; tap once to peek the full
+// value (line-clamp expands), tap again — or click while expanded — to switch
+// into the edit input. Keeps long notes discoverable without cluttering the
+// row.
+const notesEditing = ref(null)
+const notesExpanded = ref(new Set())
+async function onNotesClick(day) {
+  const id = day.id
+  // Empty cell: jump straight to edit (no point in "expanding" nothing).
+  if (!day.notes) {
+    notesEditing.value = id
+    await nextTick()
+    document.querySelector('.cell-notes')?.focus?.()
+    return
+  }
+  if (notesExpanded.value.has(id)) {
+    // Already peeking — promote to edit mode.
+    const next = new Set(notesExpanded.value); next.delete(id)
+    notesExpanded.value = next
+    notesEditing.value = id
+    await nextTick()
+    document.querySelector('.cell-notes')?.focus?.()
+  } else {
+    const next = new Set(notesExpanded.value); next.add(id)
+    notesExpanded.value = next
+  }
+}
+
+// Mobile collapse: each row starts collapsed (slim summary) on small viewports.
+// Tap the chevron — or anywhere on the date column — to expand. The set is
+// shared with desktop but harmless there since the CSS only listens to it
+// inside the @media block.
+const mobileExpanded = ref(new Set())
+function toggleMobileExpand(id) {
+  const next = new Set(mobileExpanded.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  mobileExpanded.value = next
+}
+
+// Ghost rows + drag-to-reorder ------------------------------------------------
+// The native HTML5 drag API only fires drag events on elements with
+// draggable=true. We bind that to the row only while a grip is held — letting
+// inputs inside the row stay clickable/selectable normally.
+const dragSourceId = ref(null)
+const dropTargetKey = ref(null)
+function onRowDragStart(r, e) {
+  if (r.isGhost) return
+  dragSourceId.value = r.day.id
+  e.dataTransfer.effectAllowed = 'move'
+  // Required for Firefox to fire dragstart at all.
+  try { e.dataTransfer.setData('text/plain', String(r.day.id)) } catch {}
+}
+function onRowDragEnd() {
+  dragSourceId.value = null
+  dropTargetKey.value = null
+}
+function onRowDragOver(r, e) {
+  if (dragSourceId.value == null) return
+  if (r.day.id === dragSourceId.value) return
+  e.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = r.key
+}
+function onGhostDragOver(r, e) {
+  if (dragSourceId.value == null) return
+  e.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = r.key
+}
+function onRowDragLeave(r) {
+  if (dropTargetKey.value === r.key) dropTargetKey.value = null
+}
+function shiftDate(iso, deltaDays) {
+  const d = new Date(iso)
+  d.setUTCDate(d.getUTCDate() + deltaDays)
+  return d.toISOString().slice(0, 10)
+}
+function onRowDrop(targetRow) {
+  const srcId = dragSourceId.value
+  dragSourceId.value = null
+  dropTargetKey.value = null
+  if (srcId == null || targetRow.day.id === srcId) return
+  const src = (props.days || []).find((d) => d.id === srcId)
+  const tgt = targetRow.day
+  if (!src || !tgt) return
+  // Swap start dates between the two stops; preserve each stop's span by
+  // shifting end_date along by the same delta. Multi-day overlaps after the
+  // swap are the user's call — they can fine-tune from there.
+  const srcSpan = src.end_date ? Math.round((new Date(src.end_date) - new Date(src.date)) / 86400000) : 0
+  const tgtSpan = tgt.end_date ? Math.round((new Date(tgt.end_date) - new Date(tgt.date)) / 86400000) : 0
+  const srcPayload = { date: tgt.date, end_date: srcSpan ? shiftDate(tgt.date, srcSpan) : null }
+  const tgtPayload = { date: src.date, end_date: tgtSpan ? shiftDate(src.date, tgtSpan) : null }
+  emit('patch-day', { day: src, payload: srcPayload })
+  emit('patch-day', { day: tgt, payload: tgtPayload })
+}
+function onGhostDrop(ghostRow) {
+  const srcId = dragSourceId.value
+  dragSourceId.value = null
+  dropTargetKey.value = null
+  if (srcId == null) return
+  const src = (props.days || []).find((d) => d.id === srcId)
+  if (!src) return
+  // Drop onto a ghost (empty) date — just reschedule the source stop to that
+  // date, preserving its span.
+  const srcSpan = src.end_date ? Math.round((new Date(src.end_date) - new Date(src.date)) / 86400000) : 0
+  emit('patch-day', { day: src, payload: { date: ghostRow.date, end_date: srcSpan ? shiftDate(ghostRow.date, srcSpan) : null } })
+}
+function addStopOnDate(iso) {
+  emit('add-day', { date: iso, label: null })
+}
+
 // Driving legs (cached per pair). Computed locally to avoid plumbing the cache
 // from MapView; the data is derived from props.days so it refreshes with edits.
 const legCache = ref({})
@@ -626,6 +808,8 @@ const rows = computed(() => {
       lastWeekNum = weekNum
     }
     out.push({
+      key: `d:${day.id}`,
+      isGhost: false,
       day,
       dayLabel,
       cleanLabel,
@@ -642,7 +826,82 @@ const rows = computed(() => {
     })
     cumulative += span
   }
-  return out
+
+  // Inject ghost rows for unscheduled dates between the first stop and the
+  // last stop's end, so a "May 2-22 trip" with a gap between May 11 and May
+  // 22 still renders the missing days as muted placeholders. Ghost rows are
+  // not real DB entities; they get a click-to-add button + accept wishlist
+  // drops to materialise.
+  const lastSorted = sorted[sorted.length - 1]
+  const tripEnd = new Date(endOf(lastSorted))
+  const covered = new Set()
+  for (const d of sorted) {
+    let cur = new Date(d.date)
+    const stop = new Date(endOf(d))
+    while (cur <= stop) {
+      covered.add(cur.toISOString().slice(0, 10))
+      cur.setUTCDate(cur.getUTCDate() + 1)
+    }
+  }
+  const ghostRows = []
+  for (let cur = new Date(tripStart); cur <= tripEnd; cur.setUTCDate(cur.getUTCDate() + 1)) {
+    const iso = cur.toISOString().slice(0, 10)
+    if (covered.has(iso)) continue
+    const dayOffset = Math.floor((new Date(iso) - tripStart) / 86400000)
+    const weekNum = Math.floor(dayOffset / 7) + 1
+    ghostRows.push({
+      key: `g:${iso}`,
+      isGhost: true,
+      date: iso,
+      dow: shortDow(iso),
+      dayNum: shortDay(iso),
+      mon: shortMonth(iso),
+      weekNum,
+      isToday: today.value === iso,
+      isPast: iso < today.value,
+      isFuture: iso > today.value,
+    })
+  }
+  if (!ghostRows.length) return out
+
+  // Merge sorted by date — ghosts slot between real rows. Rebuild week headers
+  // so the leading row of each week (real or ghost) carries the divider.
+  const realByDate = new Map()
+  for (const r of out) realByDate.set(r.day.date, r)
+  const ghostByDate = new Map()
+  for (const g of ghostRows) ghostByDate.set(g.date, g)
+  const allDates = [...realByDate.keys(), ...ghostByDate.keys()].sort()
+  const merged = []
+  let lastWk = 0
+  const weekRangesByNum = new Map()
+  const weekSummariesByNum = new Map()
+  for (const r of out) {
+    if (r.weekHeader) {
+      weekRangesByNum.set(r.weekNum, r.weekRange)
+      weekSummariesByNum.set(r.weekNum, r.weekSummary)
+    }
+  }
+  for (const date of allDates) {
+    const row = realByDate.get(date) || ghostByDate.get(date)
+    const wk = row.weekNum
+    if (wk !== lastWk) {
+      row.weekHeader = true
+      let range = weekRangesByNum.get(wk)
+      if (!range) {
+        const ws = new Date(tripStart)
+        ws.setUTCDate(ws.getUTCDate() + (wk - 1) * 7)
+        const we = new Date(ws); we.setUTCDate(we.getUTCDate() + 6)
+        range = `${ws.getUTCDate()}–${we.getUTCDate()} ${shortMonth(we.toISOString().slice(0, 10))}`
+      }
+      row.weekRange = range
+      row.weekSummary = weekSummariesByNum.get(wk) || row.weekSummary || ''
+      lastWk = wk
+    } else {
+      row.weekHeader = false
+    }
+    merged.push(row)
+  }
+  return merged
 })
 
 // Trip meta line — derived numbers; mirrors what the dock used to show.
@@ -846,6 +1105,7 @@ function trailStats(p) {
 .week-meta { font-size: 0.66rem; color: var(--ink-faded); margin-right: 0.6rem; }
 .week-summary { font-size: 0.66rem; color: var(--ink-faded); float: right; }
 
+.c-grip { width: 1.4rem; padding-right: 0 !important; padding-left: 0.2rem !important; }
 .c-date { width: 5rem; }
 .c-day { width: 4.4rem; font-size: 0.7rem; letter-spacing: 0.12em; color: var(--ink-faded); text-transform: uppercase; }
 .c-place { min-width: 11rem; }
@@ -901,12 +1161,80 @@ function trailStats(p) {
   margin-top: 0.25rem;
   font-family: var(--mono);
   font-size: 0.7rem;
-  padding: 0.2rem 0.4rem;
-  border: 1px solid var(--ink);
+  padding: 0.25rem 0.45rem;
+  border: 1.5px solid var(--ink);
   border-radius: 3px;
   background: var(--paper);
-  width: 9rem;
+  color: var(--ink);
+  width: 9.5rem;
+  letter-spacing: 0.04em;
+  box-shadow: 0 1px 0 var(--cream-edge);
 }
+.end-picker:focus { outline: none; border-color: var(--vermillion); box-shadow: 0 0 0 2px rgba(232, 93, 60, 0.18); }
+
+/* Native date inputs are themed via the calendar-picker indicator (recoloured
+   to match the vermillion accent) and by stripping the spinner. The
+   `themed-date` class is applied to both the inline date cell and the
+   "+ extend" picker so they read as one ribbon of UI even though the cell
+   input is invisible by design. */
+.themed-date {
+  color-scheme: light;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+}
+[data-theme="dark"] .themed-date { color-scheme: dark; }
+.themed-date::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+  filter: invert(46%) sepia(78%) saturate(1789%) hue-rotate(338deg) brightness(96%) contrast(89%);
+}
+.themed-date::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+.themed-date::-webkit-inner-spin-button,
+.themed-date::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.themed-date::-webkit-datetime-edit { color: var(--ink); }
+.themed-date::-webkit-datetime-edit-fields-wrapper { padding: 0; }
+.themed-date::-webkit-datetime-edit-text { color: var(--ink-faded); padding: 0 0.1rem; }
+.themed-date::-webkit-datetime-edit-month-field,
+.themed-date::-webkit-datetime-edit-day-field,
+.themed-date::-webkit-datetime-edit-year-field { color: var(--ink); }
+
+/* Drag-to-reorder grip. Hidden until the row is hovered so the table stays
+   clean — appears as a low-key two-dot handle the user can grab to drag. */
+.grip {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 1.1rem;
+  line-height: 0.7;
+  letter-spacing: -0.05em;
+  cursor: grab;
+  padding: 0.2rem 0.15rem;
+  opacity: 0;
+  transition: opacity 90ms ease, color 90ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.plan-row:hover .grip,
+.plan-row.is-dragged .grip { opacity: 0.85; }
+.grip:hover { color: var(--vermillion); }
+.grip:active { cursor: grabbing; color: var(--vermillion); }
+.plan-row.is-dragged { opacity: 0.5; }
+.plan-row.drop-target td { box-shadow: inset 0 2px 0 var(--vermillion); }
+.plan-table.is-dragging .plan-row:not(.is-dragged) { cursor: grabbing; }
+
+.mobile-expand {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--cream-edge);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  padding: 0.05rem 0.45rem;
+  cursor: pointer;
+  margin-top: 0.25rem;
+}
+.mobile-expand:hover { color: var(--vermillion); border-color: var(--vermillion); }
 
 .place-cell { display: grid; gap: 0.1rem; position: relative; }
 .cell-name { font-size: 1rem; font-weight: 600; }
@@ -1002,6 +1330,89 @@ function trailStats(p) {
   box-shadow: 0 0 0 2px rgba(232, 93, 60, 0.1);
 }
 .cell-input.cell-notes { font-size: 0.86rem; color: var(--ink-soft); }
+
+.mobile-name { display: none; }
+
+/* Read-only display of a note: ellipsised, tooltip carries full text. Click
+   to peek (line-clamp expands), click again to switch into the input above
+   for editing. Empty notes render as a faint placeholder so the cell still
+   reads as actionable. */
+.cell-notes-display {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: text;
+  border-radius: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 1.3;
+}
+.cell-notes-display.is-empty { color: var(--ink-faded); }
+.cell-notes-display:hover { border-color: var(--cream-edge); }
+.cell-notes-display.is-expanded {
+  white-space: normal;
+  overflow: visible;
+  background: var(--cream);
+  border-color: var(--cream-edge);
+  cursor: pointer;
+}
+
+/* Mobile-only inline drive-time line under the stop name. Hidden on desktop
+   (the "Drive next" column already shows it); revealed inside @media below. */
+.mobile-summary { display: none; margin: 0; font-size: 0.7rem; color: var(--ink-faded); letter-spacing: 0.04em; }
+
+/* Ghost rows for unscheduled trip days. Muted typography, dashed border on
+   the date cell, and an inline "+ add stop" button so a user planning a
+   "May 2-22" trip with stops only on May 2-11 still sees May 12-21 and can
+   one-click attach a place to any of them. Also accepts wishlist drops via
+   the row-level @drop handler. */
+.plan-row.plan-ghost td {
+  background: transparent;
+  color: var(--ink-faded);
+  border-bottom: 1px dashed var(--cream-edge);
+}
+.plan-row.plan-ghost:hover td { background: var(--cream); }
+.plan-row.plan-ghost .ghost-date {
+  border: 1px dashed var(--cream-edge);
+  border-radius: 3px;
+  opacity: 0.7;
+}
+.plan-row.plan-ghost .d-num { font-size: 1.2rem; color: var(--ink-faded); }
+.ghost-add {
+  background: transparent;
+  border: 1px dashed var(--cream-edge);
+  border-radius: 999px;
+  color: var(--ink-faded);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.7rem;
+  cursor: pointer;
+  margin-right: 0.5rem;
+}
+.ghost-add:hover {
+  color: var(--vermillion);
+  border-color: var(--vermillion);
+  border-style: solid;
+  background: var(--paper);
+}
+.ghost-hint {
+  font-size: 0.66rem;
+  color: var(--ink-faded);
+  letter-spacing: 0.04em;
+  font-style: italic;
+}
+.plan-row.plan-ghost.drop-target td {
+  background: rgba(232, 93, 60, 0.08);
+  box-shadow: inset 0 0 0 2px var(--vermillion);
+}
 .cell-hint {
   display: inline-block;
   margin-left: 0.4rem;
@@ -1253,18 +1664,60 @@ function trailStats(p) {
   .plan-table thead { display: none; }
   .plan-table, .plan-table tbody, .plan-table tr, .plan-table td { display: block; width: 100%; }
   .plan-row {
+    position: relative;
     border: 1px solid var(--cream-edge);
     border-radius: 4px;
-    margin-bottom: 0.6rem;
-    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.45rem;
+    padding: 0.5rem 0.7rem;
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.25rem;
+    grid-template-columns: 4.4rem 1fr;
+    gap: 0.3rem 0.6rem;
+    align-items: start;
   }
-  .plan-row td { border: none; padding: 0.15rem 0; }
+  .plan-row td { border: none; padding: 0; }
+  .plan-row .c-date { grid-column: 1 / 2; grid-row: 1 / span 6; }
+  .plan-row .c-day,
+  .plan-row .c-place,
+  .plan-row .c-notes,
+  .plan-row .c-pins,
+  .plan-row .c-leg,
+  .plan-row .c-act { grid-column: 2 / 3; }
+  .plan-row .c-day { display: none; } /* day index already implied by date column */
   .plan-week td { background: transparent; border: none; }
-  .c-date, .c-day, .c-place, .c-notes, .c-pins, .c-leg, .c-act { width: auto; }
+  .c-grip, .c-date, .c-day, .c-place, .c-notes, .c-pins, .c-leg, .c-act { width: auto; }
   .c-act { display: flex; justify-content: flex-end; }
   .pins-cell { flex-direction: row; }
+  .plan-row .c-grip { display: none; }
+
+  .mobile-expand { display: inline-flex; }
+  .mobile-summary { display: block; margin-top: 0.15rem; }
+  /* Drive column is redundant on mobile (the inline summary under the name
+     covers it) — hide unless the row is expanded. */
+  .plan-row .c-leg { display: none; }
+
+  /* Collapsed state: row reads as date · name · drive — everything else
+     hidden until the user taps the chevron. Brings a 21-stop trip from
+     ~12,000px tall down to ~3,500px scrollable list. */
+  .plan-row:not(.is-expanded):not(.plan-ghost) .c-notes,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .c-pins,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .c-act,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .end-edit,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .end-picker,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .place-loc,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .cell-name {
+    display: none;
+  }
+  .plan-row:not(.is-expanded):not(.plan-ghost) .mobile-name {
+    display: block;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+  .plan-row.is-expanded .mobile-summary { display: none; }
+  .plan-row.is-expanded .c-leg { display: block; }
+
+  .plan-row.plan-ghost { padding: 0.35rem 0.6rem; }
+  .plan-row.plan-ghost .c-place { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 }
 </style>
