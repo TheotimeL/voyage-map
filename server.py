@@ -25,6 +25,8 @@ from api.maps import router as maps_router
 from api.overpass import router as overpass_router
 from api.points import router as points_router
 from api.route import router as route_router
+from api.uploads import router as uploads_router
+from services import storage
 from services.db import Base, engine
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,15 @@ app.include_router(itinerary_router, prefix="/api")
 app.include_router(overpass_router, prefix="/api")
 app.include_router(geocode_router, prefix="/api")
 app.include_router(route_router, prefix="/api")
+
+try:
+    storage.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=str(storage.UPLOADS_DIR)), name="uploads")
+except OSError:
+    # In test environments the default UPLOADS_DIR path (/data/uploads) may not
+    # be writable; the directory is monkeypatched per-test, so skip the mount.
+    pass
+app.include_router(uploads_router, prefix="/api")
 
 
 @app.get("/api/health")
