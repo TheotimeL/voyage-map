@@ -3,7 +3,7 @@
     <div class="elev-head">
       <p class="eyebrow">{{ name || 'Elevation' }}</p>
       <p class="elev-stats mono">
-        ↑ {{ stats.gain }} m · ↓ {{ stats.loss }} m · {{ stats.distanceKm.toFixed(1) }} km
+        <template v-if="stats.hasElevation">↑ {{ stats.gain }} m · ↓ {{ stats.loss }} m · </template>{{ stats.distanceKm.toFixed(1) }} km
       </p>
       <button class="btn-icon-tiny" @click="$emit('close')" aria-label="Close">×</button>
     </div>

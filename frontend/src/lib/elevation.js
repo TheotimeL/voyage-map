@@ -33,9 +33,11 @@ export function buildElevationSeries(coords, elevations, targetPoints = 200) {
 
 export function elevationStats(series) {
   let gain = 0, loss = 0, min = Infinity, max = -Infinity
+  let samples = 0
   for (let i = 0; i < series.length; i++) {
     const e = series[i].ele
     if (e == null) continue
+    samples++
     if (e < min) min = e
     if (e > max) max = e
     if (i > 0 && series[i - 1].ele != null) {
@@ -44,11 +46,16 @@ export function elevationStats(series) {
       else loss += -d
     }
   }
+  // OSM-derived trails (built via overpass + coordsToGPX) never carry
+  // elevation data — distinguish "no data" from "0 m gain" so consumers
+  // can show "—" instead of a misleading "D+ 0 m".
+  const hasElevation = samples > 0
   return {
-    gain: Math.round(gain),
-    loss: Math.round(loss),
+    gain: hasElevation ? Math.round(gain) : null,
+    loss: hasElevation ? Math.round(loss) : null,
     min: Number.isFinite(min) ? Math.round(min) : null,
     max: Number.isFinite(max) ? Math.round(max) : null,
+    hasElevation,
     distanceKm: series.at(-1) ? series.at(-1).dist / 1000 : 0,
   }
 }

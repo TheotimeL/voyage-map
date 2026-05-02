@@ -1,5 +1,5 @@
 <template>
-  <div class="map-fab-wrap">
+  <div class="map-fab-wrap" :class="{ 'is-hidden': hidden }" :aria-hidden="hidden ? 'true' : null">
     <Transition name="fab-pop">
       <div v-if="open && !armed" class="fab-menu paper" role="menu">
         <p class="fab-menu-eyebrow mono">Add to trip</p>
@@ -7,21 +7,21 @@
           <span class="fab-menu-icon" aria-hidden="true">▣</span>
           <span class="fab-menu-text">
             <strong>Add a stop</strong>
-            <em>A place you'll sleep or hang out</em>
+            <em>Date + place — opens the planner</em>
           </span>
         </button>
         <button type="button" class="fab-menu-item" @click="pick('pin')">
           <span class="fab-menu-icon" aria-hidden="true">⌖</span>
           <span class="fab-menu-text">
             <strong>Drop a pin</strong>
-            <em>Click anywhere on the map</em>
+            <em>Tap anywhere on the map</em>
           </span>
         </button>
         <button type="button" class="fab-menu-item" @click="pick('search')">
           <span class="fab-menu-icon" aria-hidden="true">⚲</span>
           <span class="fab-menu-text">
             <strong>Search a place</strong>
-            <em>Find by name</em>
+            <em>Find by name in the planner</em>
           </span>
         </button>
       </div>
@@ -39,6 +39,10 @@ const props = defineProps({
   // armed === true while drop-mode is engaged (next map click drops a pin).
   // The popover hides itself in that case so the × on the FAB is unambiguous.
   armed: { type: Boolean, default: false },
+  // hidden === true while a PointDetailCard is open. On mobile that card
+  // slides up from the bottom and would otherwise sit underneath the FAB,
+  // hiding the Delete button — so we yank the FAB out of the way.
+  hidden: { type: Boolean, default: false },
 })
 const emit = defineEmits(['drop', 'search', 'add-stop'])
 
@@ -79,6 +83,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true))
   right: 16px;
   bottom: 16px;
   z-index: 850;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.map-fab-wrap.is-hidden {
+  opacity: 0;
+  transform: translateY(8px) scale(0.9);
+  pointer-events: none;
 }
 .map-fab {
   width: 56px;

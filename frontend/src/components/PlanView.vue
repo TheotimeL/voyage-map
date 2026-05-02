@@ -272,7 +272,7 @@
           </div>
           <p v-if="p.comment" class="pin-card-comment">{{ p.comment }}</p>
           <p class="pin-card-meta mono">
-            <span v-if="trailStats(p)" class="pin-card-trail">{{ trailStats(p).km }} km · D+ {{ trailStats(p).gain }} m</span>
+            <span v-if="trailStats(p)" class="pin-card-trail">{{ trailStats(p).km }} km<template v-if="trailStats(p).gain != null"> · D+ {{ trailStats(p).gain }} m</template></span>
             <span class="pin-card-coord">{{ formatLat(p.lat) }} · {{ formatLng(p.lng) }}</span>
           </p>
           <div v-if="p.itinerary_day_id != null" class="pin-card-actions">
@@ -294,7 +294,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { CATEGORIES, formatLat, formatLng, parseGPX, todayISO } from '@/util.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { fmtMinutes, routeLeg } from '@/lib/routing.js'
@@ -313,7 +313,6 @@ const emit = defineEmits([
   'update:title',
   'add-day', 'delete-day', 'patch-day', 'edit-day',
   'add-pin', 'attach-pin', 'detach-pin', 'edit-pin', 'delete-pin',
-  'find-trails',
   'open-paste',
 ])
 
@@ -363,9 +362,23 @@ const visiblePins = computed(() => {
   return filteredPool.value.filter((p) => !hiddenCats.value.has(p.category))
 })
 
-// "Add a stop" disclosure — auto-open when the trip is empty.
+// "Add a stop" disclosure — auto-open when the trip is empty. The FAB in
+// MapView calls openAddRow() to surface this same disclosure from Map mode
+// (the dock-era selectors are gone).
 const addOpen = ref(false)
 watch(() => props.days?.length, (n) => { if (!n) addOpen.value = true }, { immediate: true })
+
+async function openAddRow({ focus = 'date' } = {}) {
+  addOpen.value = true
+  await nextTick()
+  const sel = focus === 'search'
+    ? '.add-row .geo input.field'
+    : '.add-row .add-date'
+  const el = document.querySelector(sel) || document.querySelector('.add-row .add-date')
+  el?.focus()
+  el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+}
+defineExpose({ openAddRow })
 
 const addDate = ref(today.value)
 function endOf(d) { return d.end_date || d.date }
@@ -607,7 +620,8 @@ const rows = computed(() => {
       const ws = weekStats.get(weekNum)
       if (ws) {
         const km = Math.round(ws.km)
-        weekSummary = km > 0 ? `${ws.stops} stops · ${km.toLocaleString()} km` : `${ws.stops} stops`
+        const stopsLbl = `${ws.stops} stop${ws.stops === 1 ? '' : 's'}`
+        weekSummary = km > 0 ? `${stopsLbl} · ${km.toLocaleString()} km` : stopsLbl
       }
       lastWeekNum = weekNum
     }
@@ -675,7 +689,7 @@ function trailStats(p) {
     if (!series.length) { trailMemo.set(p.id, null); return null }
     const km = (series[series.length - 1].dist / 1000).toFixed(1)
     const { gain } = elevationStats(series)
-    const out = { km, gain: Math.round(gain) }
+    const out = { km, gain: gain == null ? null : Math.round(gain) }
     trailMemo.set(p.id, out)
     return out
   } catch { trailMemo.set(p.id, null); return null }

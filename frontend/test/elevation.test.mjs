@@ -41,4 +41,21 @@ const sampleNoEle = `<?xml version="1.0"?>
 const parsed2 = parseGPX(sampleNoEle)
 assert.deepEqual(parsed2.elevations, [null, 650])
 
+// All-null elevations (OSM-derived trails imported via coordsToGPX) →
+// hasElevation false + gain/loss null so callers can render "—" instead of
+// a misleading "D+ 0 m".
+const sampleAllNull = `<?xml version="1.0"?>
+<gpx><trk><trkseg>
+  <trkpt lat="36.17" lon="-115.14"></trkpt>
+  <trkpt lat="36.18" lon="-115.13"></trkpt>
+  <trkpt lat="36.19" lon="-115.12"></trkpt>
+</trkseg></trk></gpx>`
+const parsed3 = parseGPX(sampleAllNull)
+const series3 = buildElevationSeries(parsed3.coords, parsed3.elevations)
+const stats3 = elevationStats(series3)
+assert.equal(stats3.hasElevation, false)
+assert.equal(stats3.gain, null)
+assert.equal(stats3.loss, null)
+assert.ok(stats3.distanceKm > 0)
+
 console.log('elevation: OK')

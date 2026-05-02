@@ -350,11 +350,16 @@ h1 { margin: 0.5rem 0 1rem; }
 .recent-title {
   font-family: var(--display);
   font-size: 1.1rem;
+  line-height: 1.15;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  white-space: nowrap;
+  /* Two-line clamp so trip names like "USA Southwest 2026 (Test)" wrap
+     gracefully inside the card grid instead of being chopped mid-word. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
 }
 .recent-stats { font-size: 0.72rem; color: var(--ink-soft); letter-spacing: 0.04em; }
 .recent-meta { font-size: 0.7rem; color: var(--ink-faded); letter-spacing: 0.08em; }
