@@ -112,6 +112,13 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // Uploaded images are served by FastAPI's StaticFiles mount at /uploads
+      // (see server.py). Without this proxy, vite's SPA fallback turns the
+      // image URL into index.html and the marker thumbnail silently fails.
+      '/uploads': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

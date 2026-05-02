@@ -241,7 +241,10 @@ input[type="range"]::-moz-range-thumb {
   overflow: hidden;
   box-sizing: border-box;
 }
-.pin-photo-wrap img {
+/* Leaflet's stylesheet ships `.leaflet-container .leaflet-marker-pane img
+   { width: auto }` at specificity (0,2,1) — outranking a bare `.pin-photo-wrap
+   img`. We anchor on `.leaflet-container` too so the photo fills its disc. */
+.leaflet-container .pin-photo-wrap img {
   width: 100%;
   height: 100%;
   object-fit: cover;

@@ -23,6 +23,8 @@ function openDB() {
   if (_dbPromise) return _dbPromise
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
   _dbPromise = new Promise((resolve) => {
+    let settled = false
+    const settle = (val) => { if (!settled) { settled = true; resolve(val) } }
     const req = indexedDB.open(DB_NAME, VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
@@ -30,13 +32,22 @@ function openDB() {
         db.createObjectStore(STORE, { keyPath: 'slug' })
       }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => settle(req.result)
     // Private browsing / disabled storage / quota — fail soft so the rest of
     // the app still works against the network.
     req.onerror = () => {
       console.warn('voyage-snapshot: indexedDB.open failed', req.error)
-      resolve(null)
+      settle(null)
     }
+    // A pending `deleteDatabase` from another tab can leave open() blocked
+    // forever ("blocked" event when other connections exist; otherwise just
+    // silent). Two seconds is a long time for a local DB open — past that,
+    // bail out and run snapshot-less so the whole app doesn't hang.
+    req.onblocked = () => {
+      console.warn('voyage-snapshot: indexedDB.open blocked')
+      settle(null)
+    }
+    setTimeout(() => settle(null), 2000)
   })
   return _dbPromise
 }

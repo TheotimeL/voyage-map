@@ -7,12 +7,14 @@
       <button type="button" :class="{ active: editor.isActive('bulletList') }" @click="editor.chain().focus().toggleBulletList().run()" title="Bullet list">•</button>
       <button type="button" @click="editor.chain().focus().setHorizontalRule().run()" title="Horizontal rule">—</button>
       <button type="button" @click="onLink" title="Link">🔗</button>
-      <label class="img-btn" title="Insert image">
-        📷
-        <input type="file" accept="image/*" class="hidden" @change="onPickImage" />
+      <label class="img-btn" :class="{ 'is-uploading': uploading }" :title="uploading ? 'Uploading…' : 'Insert image'">
+        <span v-if="uploading" class="img-spinner" aria-hidden="true">⟳</span>
+        <span v-else>📷</span>
+        <input type="file" accept="image/*" class="hidden" :disabled="uploading" @change="onPickImage" />
       </label>
     </div>
     <editor-content :editor="editor" class="md-surface" />
+    <p v-if="uploading" class="md-hint">Uploading image — keep the form open until it's done.</p>
     <p v-if="uploadError" class="md-error">{{ uploadError }}</p>
   </div>
 </template>
@@ -32,9 +34,14 @@ const props = defineProps({
   modelValue: { type: String, default: '' },
   placeholder: { type: String, default: 'Notes…' },
 })
-const emit = defineEmits(['update:modelValue'])
+// `update:uploading` lets the parent form disable Save while a file is in
+// flight. Without it, the user could click Save before the upload finishes,
+// the form would persist a comment that doesn't reference the new image, and
+// the post-modal-close insertion would silently no-op into a destroyed editor.
+const emit = defineEmits(['update:modelValue', 'update:uploading'])
 
 const uploadError = ref('')
+const uploading = ref(false)
 
 const editor = useEditor({
   content: props.modelValue,
@@ -82,11 +89,16 @@ async function onPickImage(e) {
 async function uploadAndInsert(file) {
   if (!file || !file.type.startsWith('image/')) return
   uploadError.value = ''
+  uploading.value = true
+  emit('update:uploading', true)
   try {
     const { url } = await uploadImage(file)
     editor.value?.chain().focus().setImage({ src: url, alt: file.name || '' }).run()
   } catch (err) {
     uploadError.value = err.message || 'Upload failed.'
+  } finally {
+    uploading.value = false
+    emit('update:uploading', false)
   }
 }
 
@@ -164,4 +176,8 @@ function onLink() {
 }
 .md-surface :deep(img) { max-width: 100%; border-radius: 6px; cursor: grab; }
 .md-error { color: #b53127; font-size: 0.85em; padding: 0 0.8rem 0.4rem; }
+.md-hint { color: var(--ink-faded, #968b76); font-size: 0.8em; padding: 0 0.8rem 0.4rem; margin: 0; font-style: italic; }
+.img-btn.is-uploading { opacity: 0.7; pointer-events: none; }
+.img-spinner { display: inline-block; animation: md-spin 0.9s linear infinite; }
+@keyframes md-spin { to { transform: rotate(360deg); } }
 </style>

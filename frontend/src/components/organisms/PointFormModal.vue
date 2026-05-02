@@ -45,7 +45,7 @@
           @click="toggleFlag(f.key)"
         >{{ f.label }}</button>
       </div>
-      <MarkdownEditor v-model="form.comment" placeholder="Notes, links, photos…" />
+      <MarkdownEditor v-model="form.comment" placeholder="Notes, links, photos…" @update:uploading="(v) => uploading = v" />
 
       <label class="lbl">Category</label>
       <div class="cat-grid">
@@ -64,14 +64,16 @@
 
       <div class="row">
         <button type="button" class="btn btn-ghost" @click="$emit('close')">Cancel</button>
-        <button type="submit" class="btn">{{ isNew ? 'Drop pin' : 'Save' }}</button>
+        <button type="submit" class="btn" :disabled="uploading" :title="uploading ? 'Wait for image upload to finish' : null">
+          {{ uploading ? 'Uploading…' : (isNew ? 'Drop pin' : 'Save') }}
+        </button>
       </div>
     </form>
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
+import { computed, reactive, ref, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { CATEGORIES, formatLat, formatLng } from '@/util.js'
 import MarkdownEditor from '@/components/molecules/MarkdownEditor.vue'
 
@@ -94,6 +96,10 @@ const props = defineProps({
 const emit = defineEmits(['save', 'close'])
 
 const categories = CATEGORIES
+// Bound to MarkdownEditor's `update:uploading` so we can grey out Save while
+// an image is in flight — submitting mid-upload would persist a comment that
+// doesn't reference the new image and the post-close insert no-ops.
+const uploading = ref(false)
 
 const form = reactive({
   title: props.modelValue.title || '',

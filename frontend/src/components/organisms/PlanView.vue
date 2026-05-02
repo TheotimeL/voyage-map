@@ -232,24 +232,13 @@
                 </div>
               </td>
               <td class="c-notes">
-                <input
-                  v-if="notesEditing === r.day.id"
-                  ref="notesInputEl"
-                  class="cell-input cell-notes"
-                  :value="r.day.notes || ''"
-                  placeholder="—"
-                  @blur="onNotesBlur(r.day, $event.target.value); notesEditing = null"
-                  @keydown.enter="$event.target.blur()"
-                  @keydown.escape="notesEditing = null"
-                />
                 <button
-                  v-else
                   type="button"
                   class="cell-notes-display"
-                  :class="{ 'is-empty': !r.day.notes, 'is-expanded': notesExpanded.has(r.day.id) }"
-                  :title="r.day.notes || 'Click to add a note'"
-                  @click="onNotesClick(r.day)"
-                >{{ r.day.notes || '—' }}</button>
+                  :class="{ 'is-empty': !r.day.notes }"
+                  :title="r.day.notes ? 'Open journal' : 'Add a journal entry'"
+                  @click="emit('edit-day', r.day)"
+                >{{ r.day.notes ? markdownExcerpt(r.day.notes, 80) : '—' }}</button>
               </td>
               <td class="c-pins">
                 <div class="pins-cell">
@@ -403,7 +392,7 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { CATEGORIES, formatLat, formatLng, parseGPX, todayISO } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, parseGPX, todayISO, markdownExcerpt } from '@/util.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { fmtMinutes, routeLeg } from '@/lib/routing.js'
 import { dailyForecast, glyphFor } from '@/lib/weather.js'
@@ -651,40 +640,9 @@ function onLabelBlur(day, value) {
   if (next === current) return
   emit('patch-day', { day, payload: { label: next || null } })
 }
-function onNotesBlur(day, value) {
-  const next = (value || '').trim()
-  const current = (day.notes || '').trim()
-  if (next === current) return
-  emit('patch-day', { day, payload: { notes: next || null } })
-}
-
-// Notes are read-only ellipsised text by default; tap once to peek the full
-// value (line-clamp expands), tap again — or click while expanded — to switch
-// into the edit input. Keeps long notes discoverable without cluttering the
-// row.
-const notesEditing = ref(null)
-const notesExpanded = ref(new Set())
-async function onNotesClick(day) {
-  const id = day.id
-  // Empty cell: jump straight to edit (no point in "expanding" nothing).
-  if (!day.notes) {
-    notesEditing.value = id
-    await nextTick()
-    document.querySelector('.cell-notes')?.focus?.()
-    return
-  }
-  if (notesExpanded.value.has(id)) {
-    // Already peeking — promote to edit mode.
-    const next = new Set(notesExpanded.value); next.delete(id)
-    notesExpanded.value = next
-    notesEditing.value = id
-    await nextTick()
-    document.querySelector('.cell-notes')?.focus?.()
-  } else {
-    const next = new Set(notesExpanded.value); next.add(id)
-    notesExpanded.value = next
-  }
-}
+// Notes cell: read-only excerpt that opens the day modal (full markdown
+// editor) on click. The plan table stays scannable; rich notes/photos live
+// in the modal so they don't tax the row layout.
 
 // Mobile collapse: each row starts collapsed (slim summary) on small viewports.
 // Tap the chevron — or anywhere on the date column — to expand. The set is
@@ -1515,14 +1473,11 @@ function trailStats(p) {
   background: var(--paper);
   box-shadow: 0 0 0 2px rgba(232, 93, 60, 0.1);
 }
-.cell-input.cell-notes { font-size: 0.86rem; color: var(--ink-soft); }
-
 .mobile-name { display: none; }
 
-/* Read-only display of a note: ellipsised, tooltip carries full text. Click
-   to peek (line-clamp expands), click again to switch into the input above
-   for editing. Empty notes render as a faint placeholder so the cell still
-   reads as actionable. */
+/* Read-only excerpt of a note. Click → opens the day modal (full markdown
+   editor). Empty notes render as a faint placeholder so the cell still reads
+   as actionable. */
 .cell-notes-display {
   width: 100%;
   background: transparent;
@@ -1532,7 +1487,7 @@ function trailStats(p) {
   font-size: 0.86rem;
   color: var(--ink-soft);
   text-align: left;
-  cursor: text;
+  cursor: pointer;
   border-radius: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -1542,13 +1497,6 @@ function trailStats(p) {
 }
 .cell-notes-display.is-empty { color: var(--ink-faded); }
 .cell-notes-display:hover { border-color: var(--cream-edge); }
-.cell-notes-display.is-expanded {
-  white-space: normal;
-  overflow: visible;
-  background: var(--cream);
-  border-color: var(--cream-edge);
-  cursor: pointer;
-}
 
 /* Mobile-only inline drive-time line under the stop name. Hidden on desktop
    (the "Drive next" column already shows it); revealed inside @media below. */

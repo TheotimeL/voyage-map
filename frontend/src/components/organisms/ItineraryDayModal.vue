@@ -32,7 +32,7 @@
       <p class="hint mono">After saving, drag the day's pin on the map to fine-tune.</p>
 
       <label class="lbl">Notes</label>
-      <MarkdownEditor v-model="form.notes" placeholder="Plans, journal, photos…" />
+      <MarkdownEditor v-model="form.notes" placeholder="Plans, journal, photos…" @update:uploading="(v) => uploading = v" />
 
       <button v-if="hasCoord" type="button" class="btn directions" @click="onDirections">
         Directions →
@@ -40,14 +40,16 @@
 
       <div class="row">
         <button type="button" class="btn btn-ghost" @click="$emit('close')">Cancel</button>
-        <button type="submit" class="btn">Save</button>
+        <button type="submit" class="btn" :disabled="uploading" :title="uploading ? 'Wait for image upload to finish' : null">
+          {{ uploading ? 'Uploading…' : 'Save' }}
+        </button>
       </div>
     </form>
   </div>
 </template>
 
 <script setup>
-import { reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch } from 'vue'
+import { reactive, ref, onMounted, onBeforeUnmount, useTemplateRef, computed, watch } from 'vue'
 import { formatLat, formatLng, openInMaps } from '@/util.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 import MarkdownEditor from '@/components/molecules/MarkdownEditor.vue'
@@ -58,6 +60,10 @@ const props = defineProps({
   existingPins: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['save', 'close'])
+
+// See PointFormModal: blocks Save while a markdown image is mid-upload so the
+// user can't ship a comment that doesn't reference the file they just picked.
+const uploading = ref(false)
 
 const form = reactive({
   date: props.modelValue.date,

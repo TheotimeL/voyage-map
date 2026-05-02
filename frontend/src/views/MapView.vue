@@ -275,6 +275,15 @@
     />
 
     <Teleport to="body">
+      <Transition name="reveal">
+        <div v-if="error" class="error-toast" role="alert" @click="error = ''">
+          <span class="error-toast-msg">{{ error }}</span>
+          <button class="error-toast-close" type="button" aria-label="Dismiss">×</button>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
       <div v-if="candidatesFor" class="scrim" @click.self="candidatesFor = null">
         <div class="paper candidate-modal">
           <p class="eyebrow">Multiple matches — pick one</p>
@@ -346,7 +355,14 @@ const slug = computed(() => extractId(props.slug))
 
 const mapData = ref(null)
 const loading = ref(true)
+// Surface failed mutations to the user — without this, a save error sets the
+// ref but the modal stays open with no feedback, which reads as a frozen UI.
 const error = ref('')
+let _errorClearTimer = null
+watch(error, (msg) => {
+  if (_errorClearTimer) { clearTimeout(_errorClearTimer); _errorClearTimer = null }
+  if (msg) _errorClearTimer = setTimeout(() => { error.value = '' }, 6000)
+})
 const titleDraft = ref('')
 const activeTab = ref('itinerary')
 const dockCollapsed = ref(false)
@@ -466,7 +482,17 @@ async function refreshDrivingLegs() {
     if (leg) drivingLegs.value = { ...drivingLegs.value, [k]: leg }
   }
 }
-watch(() => mapData.value?.itinerary, () => refreshDrivingLegs(), { immediate: true, deep: true })
+// Only re-route when the geometry-relevant fields change. A `deep: true`
+// watch here fires on every notes/weather-cache update (sibling fields)
+// and triggers a full driving-legs re-fetch on every keystroke.
+watch(
+  () => {
+    const days = mapData.value?.itinerary || []
+    return days.map((d) => `${d.id}|${d.date}|${d.lat}|${d.lng}`).join('§')
+  },
+  () => refreshDrivingLegs(),
+  { immediate: true },
+)
 
 const tripStats = computed(() => {
   if (!mapData.value) return null
@@ -561,23 +587,30 @@ watch(mapPoints, (next) => {
   const allowed = new Set(next.map((p) => p.id))
   const cluster = clusterGroup.value
   for (const [id, marker] of pointMarkers.entries()) {
-    // hasLayer on the cluster group is true even when a marker is
-    // visually folded into a "+N" bubble — that's exactly what we want.
-    const onMap = cluster ? cluster.hasLayer(marker) : leaflet?.hasLayer(marker)
+    // Photo pins live directly on the map (see addPointMarker); regular pins
+    // are in the cluster group. Pick the right host per marker.
+    const inCluster = marker._inCluster && cluster
+    const onMap = inCluster ? cluster.hasLayer(marker) : leaflet?.hasLayer(marker)
     if (allowed.has(id) && !onMap) {
-      if (cluster) cluster.addLayer(marker)
+      if (inCluster) cluster.addLayer(marker)
       else marker.addTo(leaflet)
     } else if (!allowed.has(id) && onMap) {
-      if (cluster) cluster.removeLayer(marker)
+      if (inCluster) cluster.removeLayer(marker)
       else leaflet.removeLayer(marker)
     }
   }
 })
 
+// Re-render itinerary markers only when something the markers actually
+// display changes. A `deep: true` watch fires on every weather-cache touch
+// (a sibling field on the day) and forced full marker rebuild on every pan,
+// killing zoom feel. Key on the marker-relevant fields only.
 watch(
-  () => mapData.value?.itinerary,
+  () => {
+    const days = mapData.value?.itinerary || []
+    return days.map((d) => `${d.id}|${d.date}|${d.end_date || ''}|${d.lat}|${d.lng}|${d.label || ''}`).join('§')
+  },
   () => renderItinerary(),
-  { deep: true },
 )
 
 // Re-render itinerary markers whenever the day-attachment of a pin changes
@@ -650,10 +683,16 @@ watch(
 // Mirror the live in-memory map into IndexedDB so the next cold-start picks
 // up every mutation, not just whatever the last server fetch returned.
 // Fire-and-forget — storage failures (private mode, quota, etc.) shouldn't
-// disturb the UI.
+// disturb the UI. Debounced because each keystroke in a markdown editor
+// triggers this watch, and JSON.stringify of the whole map is not free.
+let _snapshotTimer = null
 watch(
   () => mapData.value,
-  (next) => { if (next) writeSnapshot(slug.value, next) },
+  (next) => {
+    if (!next) return
+    if (_snapshotTimer) clearTimeout(_snapshotTimer)
+    _snapshotTimer = setTimeout(() => writeSnapshot(slug.value, next), 400)
+  },
   { deep: true },
 )
 
@@ -932,16 +971,29 @@ function initLeaflet() {
   // Initial view: fit to points + itinerary if any, otherwise centre on the map's saved center.
   fitToContent({ initial: true, fallbackCenter: center })
 
+  // Both spreadOverlappingPins (O(N²) with latLngToContainerPoint reads +
+  // setLatLng writes) and hideOverlappingLabels (getBoundingClientRect in a
+  // loop) trigger layout sync. Coalesce to one rAF per move/zoom — Leaflet's
+  // own zoom animation paints multiple intermediate moveend events, and
+  // recomputing them all stalls interaction.
+  let _layoutPending = false
+  function scheduleLayout() {
+    if (_layoutPending) return
+    _layoutPending = true
+    requestAnimationFrame(() => {
+      _layoutPending = false
+      spreadOverlappingPins()
+      hideOverlappingLabels()
+    })
+  }
   leaflet.on('moveend', () => {
     mapBboxBumper.value++
-    spreadOverlappingPins()
-    hideOverlappingLabels()
+    scheduleLayout()
   })
   leaflet.on('zoomend', () => {
     mapBboxBumper.value++
     applyZoomDensity()
-    spreadOverlappingPins()
-    hideOverlappingLabels()
+    scheduleLayout()
   })
   applyZoomDensity()
 
@@ -1308,7 +1360,11 @@ function addPointMarker(p) {
     L.DomEvent.stop(e)
     openDetail(p)
   })
-  if (clusterGroup.value) clusterGroup.value.addLayer(m)
+  // Photo pins skip the cluster group: a "+N" bubble would hide the thumbnail,
+  // and seeing the photo IS the point of attaching one. Regular pins still
+  // cluster so dense regions stay readable.
+  m._inCluster = !photo && !!clusterGroup.value
+  if (m._inCluster) clusterGroup.value.addLayer(m)
   else m.addTo(leaflet)
   pointMarkers.set(p.id, m)
 }
@@ -1316,7 +1372,7 @@ function addPointMarker(p) {
 function removePointMarker(id) {
   const m = pointMarkers.get(id)
   if (m) {
-    if (clusterGroup.value) clusterGroup.value.removeLayer(m)
+    if (m._inCluster && clusterGroup.value) clusterGroup.value.removeLayer(m)
     else leaflet.removeLayer(m)
     pointMarkers.delete(id)
   }
@@ -3256,4 +3312,38 @@ onBeforeUnmount(() => {
   visibility: hidden;
   pointer-events: none;
 }
+
+/* Floating error toast. Teleported to body so it stacks above any modal —
+   without this, a save failure (e.g. network drop, 422) silently sets
+   `error.value` and leaves the user staring at a frozen modal. */
+.error-toast {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4000;
+  background: var(--vermillion-deep, #b53127);
+  color: var(--paper, #fdfaf2);
+  padding: 0.6rem 0.9rem 0.6rem 1rem;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  max-width: min(560px, 92vw);
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+.error-toast-msg { line-height: 1.3; }
+.error-toast-close {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.error-toast-close:hover { opacity: 1; }
 </style>
