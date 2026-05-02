@@ -3,12 +3,16 @@ limited (429) which surfaces as opaque CORS errors. Routing through the backend
 lets us set a proper User-Agent, share an in-process cache across users, and
 serialize requests so we never breach the 1 req/s policy."""
 
+import logging
+
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from services.cache import TTLMemoryCache
+from services.geocoding import primary_resolution
 from services.throttle import AsyncThrottler
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["geocode"])
 
 NOMINATIM_BASE = "https://nominatim.openstreetmap.org"
@@ -70,13 +74,37 @@ async def reverse(
     zoom: int = Query(10, ge=0, le=18),
     accept_language: str | None = Query(None, alias="lang"),
 ):
-    # Round to 0.1° (~10 km) for the cache key — same precision the frontend used.
-    cache_key = f"r:{lat:.1f},{lng:.1f}|{zoom}|{accept_language or ''}"
+    # Round to ~1 km. The previous 0.1° (~10 km) bucket was wide enough to
+    # let a pin at Angels Landing (Washington Co., UT) collide with a cached
+    # Kane County result and serve the wrong admin polygon — we'd rather
+    # pay extra Nominatim calls than misattribute a stop's county.
+    cache_key = f"r:{lat:.2f},{lng:.2f}|{zoom}|{accept_language or ''}"
     cached = _cache.get(cache_key)
     if cached is not None:
         return cached
 
     params = {"format": "json", "zoom": zoom, "lat": lat, "lon": lng}
     data = await _nominatim_get("/reverse", params, accept_language)
+    data = _enrich_reverse(data, lat, lng)
     _cache.set(cache_key, data)
     return data
+
+
+def _enrich_reverse(data: dict, lat: float, lng: float) -> dict:
+    """Attach primary/secondary labels and log the resolved admin region.
+
+    Logging lets us spot upstream stale-tile / wrong-polygon issues (where
+    Nominatim returns the wrong county for a point) without having to
+    re-run the trip — the requested point and resolved address show up
+    side-by-side in the server log.
+    """
+    if not isinstance(data, dict):
+        return data
+    address = data.get("address") or {}
+    resolution = primary_resolution(address)
+    enriched = {**data, **resolution}
+    logger.info(
+        "reverse %.5f,%.5f → %s (county=%s state=%s)",
+        lat, lng, resolution.get("label"), address.get("county"), address.get("state"),
+    )
+    return enriched

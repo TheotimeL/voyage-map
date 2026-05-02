@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from services.cache import SQLiteTTLCache
 from services.db import engine
+from services.routing import DEFAULT_VEHICLE, calibrate_duration, known_vehicles
 from services.throttle import AsyncThrottler
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ _cache = SQLiteTTLCache(engine, table="route_cache", ttl_seconds=60 * 60 * 24 * 
 _throttle = AsyncThrottler(min_interval_seconds=0.6)  # be polite to the public OSRM demo
 
 
-def _key(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> str:
+def _key(a_lat: float, a_lng: float, b_lat: float, b_lng: float, vehicle: str) -> str:
     # Quantise to ~10 m so two near-identical pin moves still hit cache, and
     # canonicalise endpoint order (driving distance is direction-sensitive in
     # general, but for road graphs the diff is tiny — the cache hit is worth
@@ -42,10 +43,10 @@ def _key(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> str:
         (round(b_lat, 4), round(b_lng, 4)),
     ])
     (la1, ln1), (la2, ln2) = pts
-    return f"{la1},{ln1}|{la2},{ln2}"
+    return f"{la1},{ln1}|{la2},{ln2}|v={vehicle}"
 
 
-async def _fetch_osrm(a_lat: float, a_lng: float, b_lat: float, b_lng: float):
+async def _fetch_osrm(a_lat: float, a_lng: float, b_lat: float, b_lng: float, vehicle: str):
     """Call the public OSRM demo, throttled and serialized."""
     url = (
         f"{OSRM_URL}/{a_lng},{a_lat};{b_lng},{b_lat}"
@@ -68,9 +69,20 @@ async def _fetch_osrm(a_lat: float, a_lng: float, b_lat: float, b_lng: float):
     # Convert OSRM's [lng, lat] tuples to Leaflet's [lat, lng] up-front so
     # the frontend doesn't have to.
     geometry = [[lat, lng] for lng, lat in coords] if coords else None
+    distance_km = distance / 1000.0
+    raw_minutes = duration / 60.0
+    cal = calibrate_duration(distance_km, raw_minutes, vehicle)
+    if cal.applied:
+        logger.info(
+            "calibrated leg %.1fkm: raw=%.0fmin (%.0fkm/h) → %.0fmin (vehicle=%s)",
+            distance_km, cal.raw_minutes, cal.raw_avg_kmh, cal.minutes, vehicle,
+        )
     return {
-        "km": round(distance / 1000),
-        "minutes": round(duration / 60),
+        "km": round(distance_km),
+        "minutes": round(cal.minutes),
+        "raw_minutes": round(cal.raw_minutes),
+        "calibrated": cal.applied,
+        "vehicle": cal.vehicle,
         "source": "osrm",
         "geometry": geometry,
     }
@@ -82,14 +94,17 @@ async def get_route(
     a_lng: float = Query(...),
     b_lat: float = Query(...),
     b_lng: float = Query(...),
+    vehicle: str = Query(DEFAULT_VEHICLE),
 ):
-    key = _key(a_lat, a_lng, b_lat, b_lng)
+    if vehicle not in known_vehicles():
+        vehicle = DEFAULT_VEHICLE
+    key = _key(a_lat, a_lng, b_lat, b_lng, vehicle)
     cached = _cache.get(key)
     if cached is not None:
         return {**cached, "cached": True}
 
     try:
-        result = await _fetch_osrm(a_lat, a_lng, b_lat, b_lng)
+        result = await _fetch_osrm(a_lat, a_lng, b_lat, b_lng, vehicle)
     except HTTPException:
         raise
     except Exception as exc:
