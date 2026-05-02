@@ -67,10 +67,20 @@
               <span class="day-label">{{ r.cleanLabel || 'Untitled' }}</span>
               <span v-if="r.day.lat == null" class="locate-hint" title="No location yet — click to search">⌖</span>
             </button>
-            <p v-if="forecastFor(r.day)" class="iti-wx mono">
-              {{ glyphFor(forecastFor(r.day).code) }}
-              {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°
-              <template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
+            <p
+              v-for="wx in spanWeather(r.day)"
+              :key="wx.date"
+              class="iti-wx mono"
+              :class="{ 'is-faded': !wx.forecast }"
+              :title="`Forecast for ${wx.date}`"
+            >
+              <span v-if="spanWeather(r.day).length > 1" class="wx-tag">{{ wx.tag }}</span>
+              <template v-if="wx.forecast">
+                {{ glyphFor(wx.forecast.code) }}
+                {{ wx.forecast.tMax }}° / {{ wx.forecast.tMin }}°
+                <template v-if="wx.forecast.precip > 0.5"> · {{ wx.forecast.precip.toFixed(1) }}mm</template>
+              </template>
+              <template v-else-if="wx.tooFarDays != null">· weather in {{ wx.tooFarDays }}d</template>
             </p>
             <p
               v-if="bestMorning(r.day)"
@@ -80,9 +90,6 @@
               <span class="run-glyph" aria-hidden="true">▸</span>
               <span class="run-label">run</span>
               <span class="run-window">{{ bestMorning(r.day) }}</span>
-            </p>
-            <p v-else-if="weatherTooFar(r.day)" class="iti-wx mono is-faded" :title="`Forecast available within 16 days from today (${weatherStartDate})`">
-              · weather in {{ weatherTooFar(r.day) }}d
             </p>
             <p v-if="sunFor(r.day)" class="iti-sun mono" title="Sunrise → sunset (solar time at this stop)">☀ {{ sunFor(r.day) }}</p>
             <p v-if="r.day.notes" class="iti-notes">{{ r.day.notes }}</p>
@@ -330,28 +337,50 @@ const suggestedNewDate = computed(() => {
   return nextDateAfter(endOf(last))
 })
 
-// Lazy weather lookup for days within the forecast window. Stored as a
-// reactive map of "id" → forecast object so the template re-renders as
-// fetches resolve.
+// Lazy weather lookup. For multi-day stops we render one chip per day in
+// the span, so the cache is keyed by `${dayId}:${dateISO}` rather than
+// just dayId — a 2-day Vegas stop holds two entries and the row renders
+// as two stacked chips ("D1: ☀ …", "D2: 🌤 …").
 const wxMap = ref({})
-function forecastFor(d) { return wxMap.value[d.id] || null }
-// Open-Meteo's forecast_days=16 returns 16 entries — today plus 15 days
-// out — so the last forecastable date is today+15. Anything from day 16+
-// is "too far" and gets the muted placeholder.
+// Open-Meteo's forecast_days=16 returns today + 15 days (16 entries).
 const FORECAST_HORIZON_DAYS = 15
 const weatherStartDate = today.value
-function weatherTooFar(d) {
-  if (!d.date) return 0
-  const ms = new Date(d.date).getTime() - new Date(today.value).getTime()
+function spanDates(day) {
+  const start = day.date
+  const end = day.end_date || day.date
+  const span = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000))
+  const out = []
+  for (let i = 0; i <= span; i++) {
+    const d = new Date(start)
+    d.setUTCDate(d.getUTCDate() + i)
+    out.push(d.toISOString().slice(0, 10))
+  }
+  return out
+}
+function tooFarDaysFor(dateISO) {
+  const ms = new Date(dateISO).getTime() - new Date(today.value).getTime()
   const days = Math.ceil(ms / (24 * 3600 * 1000))
-  return days > FORECAST_HORIZON_DAYS ? days - FORECAST_HORIZON_DAYS : 0
+  return days > FORECAST_HORIZON_DAYS ? days - FORECAST_HORIZON_DAYS : null
+}
+function spanWeather(day) {
+  if (!day || day.lat == null || day.lng == null) return []
+  const dates = spanDates(day)
+  return dates.map((date, idx) => ({
+    date,
+    tag: `D${idx + 1}`,
+    forecast: wxMap.value[`${day.id}:${date}`] || null,
+    tooFarDays: tooFarDaysFor(date),
+  }))
 }
 async function refreshWeather(days) {
   for (const d of days) {
     if (d.id == null || d.lat == null || d.lng == null) continue
-    if (wxMap.value[d.id]) continue
-    const wx = await dailyForecast(d.lat, d.lng, d.date)
-    if (wx) wxMap.value = { ...wxMap.value, [d.id]: wx }
+    for (const date of spanDates(d)) {
+      const k = `${d.id}:${date}`
+      if (wxMap.value[k]) continue
+      const wx = await dailyForecast(d.lat, d.lng, date)
+      if (wx) wxMap.value = { ...wxMap.value, [k]: wx }
+    }
   }
 }
 watch(() => props.days, (next) => { refreshWeather(next || []) }, { immediate: true })
@@ -1198,7 +1227,16 @@ function legKm(a, b) {
   color: var(--ink-soft);
   letter-spacing: 0.04em;
 }
+.iti-wx + .iti-wx { margin-top: 0.05rem; }
 .iti-wx.is-faded { color: var(--ink-faded); font-style: italic; }
+.iti-wx .wx-tag {
+  display: inline-block;
+  min-width: 1.6rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-faded);
+  margin-right: 0.3rem;
+}
 .iti-sun {
   margin: 0.05rem 0 0;
   font-size: 0.7rem;

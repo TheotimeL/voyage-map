@@ -204,18 +204,19 @@
                     >⌖ {{ r.day.lat == null ? 'set' : 'change' }}</button>
                   </div>
                   <p
-                    v-if="forecastFor(r.day)"
+                    v-for="(wx, i) in spanWeather(r.day)"
+                    :key="wx.date"
                     class="place-wx mono"
-                    :title="`Forecast for ${r.day.date}`"
+                    :class="{ 'is-faded': !wx.forecast }"
+                    :title="`Forecast for ${wx.date}`"
                   >
-                    {{ glyphFor(forecastFor(r.day).code) }}
-                    {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°<template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
+                    <span v-if="spanWeather(r.day).length > 1" class="wx-tag">{{ wx.tag }}</span>
+                    <template v-if="wx.forecast">
+                      {{ glyphFor(wx.forecast.code) }}
+                      {{ wx.forecast.tMax }}° / {{ wx.forecast.tMin }}°<template v-if="wx.forecast.precip > 0.5"> · {{ wx.forecast.precip.toFixed(1) }}mm</template>
+                    </template>
+                    <template v-else-if="wx.tooFarDays != null">· weather in {{ wx.tooFarDays }}d</template>
                   </p>
-                  <p
-                    v-else-if="weatherTooFar(r.day)"
-                    class="place-wx mono is-faded"
-                    :title="`Forecasts available within 16 days from today`"
-                  >· weather in {{ weatherTooFar(r.day) }}d</p>
                 </div>
                 <div v-if="locationPopoverFor === r.day.id" class="popover-anchor">
                   <div class="loc-popover paper" @click.stop>
@@ -797,27 +798,60 @@ function addStopOnDate(iso) {
   emit('add-day', { date: iso, label: null })
 }
 
-// Per-row weather forecast (lazy, capped to the 16-day Open-Meteo horizon).
-// Same pattern as Itinerary.vue's `wxMap` so the trip's full week-by-week
-// outlook is visible in the table; the chip appears as fetches resolve.
+// Per-row weather forecast (lazy, capped to the Open-Meteo horizon).
+// Multi-day stops get one chip per day in the span — for a Vegas warm-up
+// dated May 16 → 17, we show two rows ("D1: ☀ …", "D2: 🌤 …") so the
+// user sees how the weather evolves across the stay, not just the
+// arrival day.
+//
+// Cache key is `${dayId}:${dateISO}` to support per-date entries; the
+// underlying lib/weather.js cache is keyed by lat/lng so all dates for
+// one stop share a single network round-trip.
 const wxMap = ref({})
-function forecastFor(d) { return wxMap.value[d.id] || null }
-// Open-Meteo's forecast_days=16 returns 16 entries — today plus 15 days
-// out — so the last forecastable date is today+15. Anything from day 16+
-// is "too far" and gets the muted placeholder.
+// Open-Meteo's forecast_days=16 returns today + 15 days (16 entries).
 const FORECAST_HORIZON_DAYS = 15
+function spanDates(day) {
+  const start = day.date
+  const end = day.end_date || day.date
+  const span = Math.max(0, daysBetween(start, end))
+  const out = []
+  for (let i = 0; i <= span; i++) {
+    const d = new Date(start)
+    d.setUTCDate(d.getUTCDate() + i)
+    out.push(d.toISOString().slice(0, 10))
+  }
+  return out
+}
+function tooFarDaysFor(dateISO) {
+  const ms = new Date(dateISO).getTime() - new Date(today.value).getTime()
+  const days = Math.ceil(ms / (24 * 3600 * 1000))
+  return days > FORECAST_HORIZON_DAYS ? days - FORECAST_HORIZON_DAYS : null
+}
+function spanWeather(day) {
+  if (!day || day.lat == null || day.lng == null) return []
+  const dates = spanDates(day)
+  return dates.map((date, idx) => ({
+    date,
+    tag: `D${idx + 1}`,
+    forecast: wxMap.value[`${day.id}:${date}`] || null,
+    tooFarDays: tooFarDaysFor(date),
+  }))
+}
+// Back-compat helper retained for `weatherTooFar` callers (other rows /
+// future use). Returns days past horizon for the stop's start date.
 function weatherTooFar(d) {
   if (!d.date) return 0
-  const ms = new Date(d.date).getTime() - new Date(today.value).getTime()
-  const days = Math.ceil(ms / (24 * 3600 * 1000))
-  return days > FORECAST_HORIZON_DAYS ? days - FORECAST_HORIZON_DAYS : 0
+  return tooFarDaysFor(d.date) || 0
 }
 async function refreshWeather(days) {
   for (const d of days) {
     if (d.id == null || d.lat == null || d.lng == null) continue
-    if (wxMap.value[d.id]) continue
-    const wx = await dailyForecast(d.lat, d.lng, d.date)
-    if (wx) wxMap.value = { ...wxMap.value, [d.id]: wx }
+    for (const date of spanDates(d)) {
+      const k = `${d.id}:${date}`
+      if (wxMap.value[k]) continue
+      const wx = await dailyForecast(d.lat, d.lng, date)
+      if (wx) wxMap.value = { ...wxMap.value, [k]: wx }
+    }
   }
 }
 watch(() => props.days, (next) => { refreshWeather(next || []) }, { immediate: true })
@@ -1397,7 +1431,16 @@ function trailStats(p) {
   letter-spacing: 0.04em;
   color: var(--ink-soft);
 }
+.place-wx + .place-wx { margin-top: 0.02rem; }
 .place-wx.is-faded { color: var(--ink-faded); font-style: italic; }
+.place-wx .wx-tag {
+  display: inline-block;
+  min-width: 1.6rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-faded);
+  margin-right: 0.3rem;
+}
 .loc-btn {
   background: transparent;
   border: 1px dashed var(--cream-edge);
