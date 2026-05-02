@@ -15,6 +15,24 @@
         placeholder="e.g. Café A Brasileira"
       />
 
+      <label class="lbl">Priority</label>
+      <div class="flag-chips priority-chips">
+        <button
+          type="button"
+          class="flag-chip priority-chip prio-must"
+          :class="{ on: form.priority === 'must' }"
+          title="Must-see — high priority"
+          @click="form.priority = 'must'"
+        >★ Must</button>
+        <button
+          type="button"
+          class="flag-chip priority-chip prio-maybe"
+          :class="{ on: form.priority === 'maybe' }"
+          title="Maybe — nice to have"
+          @click="form.priority = 'maybe'"
+        >○ Maybe</button>
+      </div>
+
       <label class="lbl">Notes</label>
       <div v-if="showFlagChips" class="flag-chips">
         <button
@@ -85,6 +103,9 @@ const form = reactive({
   title: props.modelValue.title || '',
   comment: props.modelValue.comment || '',
   category: props.modelValue.category || 'note',
+  // New pins default to must-see; existing pins keep whatever priority they
+  // had (including null for legacy pins predating this field).
+  priority: props.modelValue.priority || (props.isNew ? 'must' : null),
 })
 
 // Flag chips only make sense for sleep/camp categories — they're driven by
@@ -126,6 +147,7 @@ function submit() {
     title: form.title.trim() || null,
     comment: form.comment.trim() || null,
     category: form.category,
+    priority: form.priority || null,
   })
 }
 </script>
@@ -202,5 +224,13 @@ function submit() {
   color: var(--paper);
   border-color: var(--ink);
   border-style: solid;
+}
+.priority-chips { margin: -0.3rem 0 0; }
+.priority-chip { font-family: var(--body); font-size: 0.78rem; padding: 0.25rem 0.7rem; }
+.priority-chip.prio-must { color: var(--vermillion); border-color: var(--vermillion); }
+.priority-chip.prio-must.on {
+  background: var(--vermillion);
+  color: var(--paper);
+  border-color: var(--vermillion);
 }
 </style>

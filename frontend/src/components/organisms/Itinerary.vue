@@ -106,7 +106,9 @@
         </li>
         <ul v-if="(pinsByDay.get(r.day.id) || []).length" class="day-pins">
           <li v-for="p in (pinsByDay.get(r.day.id) || [])" :key="p.id" class="day-pin" @click.stop="$emit('select-point', p)">
-            <span class="day-pin-emoji">{{ pinEmoji(p) }}</span>
+            <span class="day-pin-emoji">
+              <span v-if="p.priority === 'must'" class="day-pin-must" title="Must-see">★</span>{{ pinEmoji(p) }}
+            </span>
             <span class="day-pin-title">{{ p.title || 'Untitled' }}</span>
             <button
               type="button"
@@ -142,6 +144,12 @@
               <span class="leg-glyph" aria-hidden="true">{{ legIsLong(r) ? '~' : '↓' }}</span>
               {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
               <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
+              <span
+                v-if="duskWarning(r)"
+                class="leg-dusk"
+                :class="duskWarning(r).level"
+                :title="duskWarning(r).title"
+              >☼ {{ duskWarning(r).label }}</span>
             </template>
           </template>
           <template v-else>
@@ -170,7 +178,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import SunCalc from 'suncalc'
 import { CATEGORIES, todayISO } from '@/util.js'
 import { dailyForecast, hourlyForecast, glyphFor } from '@/lib/weather.js'
-import { formatTime } from '@/lib/sun.js'
+import { formatTime, arrivalSafety } from '@/lib/sun.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 import PasteImportModal from './PasteImportModal.vue'
 import DayAddPinPopover from './DayAddPinPopover.vue'
@@ -355,7 +363,7 @@ const sunMap = computed(() => {
     if (d.id == null || d.lat == null || d.lng == null) continue
     const t = SunCalc.getTimes(new Date(d.date + 'T12:00:00Z'), d.lat, d.lng)
     if (!t.sunrise || !t.sunset || isNaN(t.sunrise) || isNaN(t.sunset)) continue
-    out[d.id] = `${formatTime(t.sunrise, d.lng)} → ${formatTime(t.sunset, d.lng)}`
+    out[d.id] = `${formatTime(t.sunrise, d.lat, d.lng)} → ${formatTime(t.sunset, d.lat, d.lng)}`
   }
   return out
 })
@@ -678,6 +686,40 @@ function legIsLong(row) {
   return real.minutes >= LONG_LEG_MIN || real.km >= LONG_LEG_KM
 }
 
+// "Arrive before dark" — for any drive that's at least 90 min, project an
+// arrival time at the *next* stop assuming a 10:00 wall-time depart (a
+// reasonable default for vanlife — most folks leave mid-morning), and flag
+// when the margin to local sunset is tight. Fires when there's < 60 min,
+// escalates to "danger" when arrival lands after dusk.
+const DEPART_HHMM_DEFAULT = '10:00'
+const DUSK_WARN_MIN = 60
+function duskWarning(row) {
+  const real = row?.legNext?.real
+  if (!real || real.minutes < 90) return null
+  // The next stop is the destination; row.day is the origin. Pull the next
+  // stop from the rows array via row index.
+  const idx = rows.value.indexOf(row)
+  if (idx < 0 || idx + 1 >= rows.value.length) return null
+  const dest = rows.value[idx + 1].day
+  if (!dest || dest.lat == null || dest.lng == null) return null
+  const safety = arrivalSafety({
+    destDate: dest.date,
+    destLat: dest.lat,
+    destLng: dest.lng,
+    departHHMM: DEPART_HHMM_DEFAULT,
+    driveMinutes: real.minutes,
+  })
+  if (!safety) return null
+  if (safety.marginMin >= DUSK_WARN_MIN) return null
+  const after = safety.marginMin < 0
+  const margin = after ? `${-safety.marginMin}m past sunset` : `${safety.marginMin}m before sunset`
+  return {
+    level: after ? 'danger' : 'warn',
+    label: after ? `arrives after dusk` : `${safety.marginMin}m to dusk`,
+    title: `Leaving at ${DEPART_HHMM_DEFAULT}, this drive lands at ${safety.arrive} — sunset ${safety.sunset} (${margin}).`,
+  }
+}
+
 function legKm(a, b) {
   if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null
   const R = 6371
@@ -982,6 +1024,12 @@ function legKm(a, b) {
 }
 .day-pin:hover { background: var(--cream); color: var(--vermillion); }
 .day-pin-emoji { font-size: 0.9rem; }
+.day-pin-must {
+  color: var(--vermillion);
+  font-size: 0.78rem;
+  margin-right: 0.15rem;
+  vertical-align: 1px;
+}
 .day-pin-title {
   white-space: nowrap;
   overflow: hidden;
@@ -1116,6 +1164,29 @@ function legKm(a, b) {
   padding: 0 0.3rem;
   border-radius: 2px;
   border: 1px dotted var(--cream-edge);
+}
+
+/* Dusk margin chip — sits inline with the leg distance/duration. Two
+   levels: "warn" (< 60 min to sunset) and "danger" (arrival after dusk). */
+.leg-dusk {
+  margin-left: 0.4rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.05rem 0.4rem;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.leg-dusk.warn {
+  background: #fff4d6;
+  color: #8a5a00;
+  border: 1px solid #e8c266;
+}
+.leg-dusk.danger {
+  background: var(--vermillion);
+  color: var(--paper);
+  border: 1px solid var(--vermillion-deep);
+  font-weight: 600;
 }
 
 .iti-wx {

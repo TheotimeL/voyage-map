@@ -20,6 +20,7 @@ class PointIn(BaseModel):
     gpx_data: str | None = Field(default=None, max_length=10_000_000)
     color: str | None = Field(default=None, max_length=20)
     itinerary_day_id: int | None = None
+    priority: Literal["must", "maybe"] | None = None
 
 
 class PointPatch(BaseModel):
@@ -31,6 +32,7 @@ class PointPatch(BaseModel):
     gpx_data: str | None = Field(default=None, max_length=10_000_000)
     color: str | None = Field(default=None, max_length=20)
     itinerary_day_id: int | None = None
+    priority: Literal["must", "maybe"] | None = None
 
 
 class PointOut(BaseModel):
@@ -45,6 +47,7 @@ class PointOut(BaseModel):
     gpx_data: str | None
     color: str | None
     itinerary_day_id: int | None
+    priority: Literal["must", "maybe"] | None = None
     created_at: datetime
 
 

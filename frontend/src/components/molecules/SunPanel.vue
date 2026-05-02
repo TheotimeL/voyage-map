@@ -8,21 +8,21 @@
     <ul class="sun-rows">
       <li>
         <span class="lbl">Sunset</span>
-        <span class="val">{{ formatTime(info.sunset, gotPosition ? null : lng) }}</span>
+        <span class="val">{{ formatTime(info.sunset, gotPosition ? null : lat, gotPosition ? null : lng) }}</span>
         <span class="cd mono" :class="{ urgent: cd.sunset < 60*60_000 && cd.sunset > 0 }">
           {{ formatCountdown(cd.sunset) }}
         </span>
       </li>
       <li>
         <span class="lbl">Civil dusk</span>
-        <span class="val">{{ formatTime(info.civilEnd, gotPosition ? null : lng) }}</span>
+        <span class="val">{{ formatTime(info.civilEnd, gotPosition ? null : lat, gotPosition ? null : lng) }}</span>
         <span class="cd mono" :class="{ urgent: cd.civilEnd < 60*60_000 && cd.civilEnd > 0 }">
           {{ formatCountdown(cd.civilEnd) }}
         </span>
       </li>
       <li>
         <span class="lbl">Sunrise (next)</span>
-        <span class="val">{{ formatTime(info.sunrise, gotPosition ? null : lng) }}</span>
+        <span class="val">{{ formatTime(info.sunrise, gotPosition ? null : lat, gotPosition ? null : lng) }}</span>
       </li>
     </ul>
     <p v-if="locating" class="hint mono">Locating…</p>

@@ -23,6 +23,7 @@
       @detach-pin="onDetachPoint"
       @edit-pin="onEditPin"
       @delete-pin="onDeletePinFromList"
+      @schedule-pin="onSchedulePin"
       @open-paste="showPaste = true"
     >
       <template #mode-toggle>
@@ -194,6 +195,15 @@
       </div>
     </Transition>
 
+    <!-- Undo confirmation toast — flashes briefly after Cmd/Ctrl+Z so the
+         user knows the keystroke landed (mutations on remote pins/days don't
+         always have a visible local diff). -->
+    <Transition name="toast">
+      <div v-if="undoFlash" class="undo-toast mono" role="status" aria-live="polite">
+        ↶ {{ undoFlash }}
+      </div>
+    </Transition>
+
     <!-- Tools popover — shared by both modes. Anchored to the ⋯ button in the
          topbar (Map mode) or in the Plan head-tools slot (Plan mode). Lives
          outside the map-shell so it floats above either layout. v-show (not
@@ -279,7 +289,11 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import L from 'leaflet'
+import 'leaflet.markercluster'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import SunCalc from 'suncalc'
+import { formatTime, arrivalSafety } from '@/lib/sun.js'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
 import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX } from '@/util.js'
@@ -314,11 +328,11 @@ const props = defineProps({
   slug: { type: String, required: true },
 })
 
-// `slug.value` is the raw route param — may be either the canonical 8-char
+// `props.slug` is the raw route param — may be either the canonical 8-char
 // id (legacy URLs) or "name-slug-{id}" (the new readable format). Every
 // API call, storage key, and recents lookup wants the canonical id; only
 // the share URL wants a display-friendly form.
-const slug = computed(() => extractId(slug.value))
+const slug = computed(() => extractId(props.slug))
 
 const mapData = ref(null)
 const loading = ref(true)
@@ -535,10 +549,18 @@ const visiblePoints = computed(() => {
 
 watch(mapPoints, (next) => {
   const allowed = new Set(next.map((p) => p.id))
+  const cluster = clusterGroup.value
   for (const [id, marker] of pointMarkers.entries()) {
-    const onMap = leaflet?.hasLayer(marker)
-    if (allowed.has(id) && !onMap) marker.addTo(leaflet)
-    else if (!allowed.has(id) && onMap) leaflet.removeLayer(marker)
+    // hasLayer on the cluster group is true even when a marker is
+    // visually folded into a "+N" bubble — that's exactly what we want.
+    const onMap = cluster ? cluster.hasLayer(marker) : leaflet?.hasLayer(marker)
+    if (allowed.has(id) && !onMap) {
+      if (cluster) cluster.addLayer(marker)
+      else marker.addTo(leaflet)
+    } else if (!allowed.has(id) && onMap) {
+      if (cluster) cluster.removeLayer(marker)
+      else leaflet.removeLayer(marker)
+    }
   }
 })
 
@@ -656,6 +678,7 @@ let myAccuracyCircle = null
 const trackLines = new Map() // track id → L.polyline
 const itineraryMarkers = new Map() // day id → L.marker
 const survivalGroup = ref(null)
+const clusterGroup = ref(null)
 function getMapBounds() { return leaflet?.getBounds() }
 
 // Bias passed to geocoder: prefer the visible map area; fall back to the
@@ -689,6 +712,13 @@ const pinCandidates = computed(() => {
       icon: emojiByCategory[p.category] || '📍',
     }))
 })
+// Map a survival "kind" to a personal-pin category. None of the categories
+// fit perfectly (water/toilet/dump are utility-shaped) so we default to
+// 'note' and let the kind+icon survive in the title.
+const SURVIVAL_TO_CATEGORY = {
+  water: 'note', dump: 'note', toilet: 'note', trash: 'note', shower: 'stay',
+}
+
 function renderSurvival(items) {
   if (!leaflet) return
   if (survivalGroup.value) leaflet.removeLayer(survivalGroup.value)
@@ -703,9 +733,63 @@ function renderSurvival(items) {
       }),
     })
     m.bindTooltip(it.label, { direction: 'top', offset: [0, -10] })
+    // Click → open a one-button "Save as pin" popup. Saved pins inherit the
+    // survival icon as a title prefix and a sensible default category. The
+    // marker stays in place after save (the user can find-nearby again later).
+    const popupHtml = `
+      <div class="survival-popup">
+        <div class="sp-pop-title">${it.icon} ${escapeHtml(it.label)}</div>
+        <button class="sp-pop-save" type="button" data-id="${escapeHtml(it.id)}">+ Save as pin</button>
+      </div>
+    `
+    m.bindPopup(popupHtml, { closeButton: true, autoPan: true, minWidth: 160 })
+    m.on('popupopen', (ev) => {
+      const root = ev.popup.getElement()
+      const btn = root?.querySelector('.sp-pop-save')
+      if (!btn) return
+      const handler = async () => {
+        btn.disabled = true
+        btn.textContent = 'Saving…'
+        try {
+          await saveSurvivalAsPin(it)
+          ev.popup.close()
+        } catch (err) {
+          btn.disabled = false
+          btn.textContent = '+ Save as pin'
+          error.value = err?.message || 'Could not save pin.'
+        }
+      }
+      btn.addEventListener('click', handler, { once: true })
+    })
     survivalGroup.value.addLayer(m)
   }
   survivalGroup.value.addTo(leaflet)
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ))
+}
+
+async function saveSurvivalAsPin(it) {
+  const category = SURVIVAL_TO_CATEGORY[it.kind] || 'note'
+  const title = `${it.icon} ${it.label}`.slice(0, 120)
+  const created = await api.addPoint(slug.value, {
+    lat: it.lat,
+    lng: it.lng,
+    title,
+    category,
+    priority: 'maybe',
+  })
+  if (!mapData.value.points) mapData.value.points = []
+  mapData.value.points.push(created)
+  addPointMarker(created)
+  pushUndo(`save "${title}"`, async () => {
+    await api.deletePoint(slug.value, created.id)
+    mapData.value.points = mapData.value.points.filter((p) => p.id !== created.id)
+    removePointMarker(created.id)
+  })
 }
 function clearSurvival() {
   if (survivalGroup.value && leaflet) leaflet.removeLayer(survivalGroup.value)
@@ -814,6 +898,17 @@ function initLeaflet() {
   // (zoom map vs add to trip) don't visually compete.
   L.control.zoom({ position: 'bottomleft' }).addTo(leaflet)
   attachTiles()
+
+  // Cluster personal pins so dense regions show a "+N" bubble instead of a
+  // single overlapping marker. Trail polylines and the survival/Overpass
+  // group are intentionally NOT routed through here — only point markers.
+  clusterGroup.value = L.markerClusterGroup({
+    maxClusterRadius: 50,
+    disableClusteringAtZoom: 14,
+    showCoverageOnHover: false,
+    spiderfyOnMaxZoom: true,
+  })
+  clusterGroup.value.addTo(leaflet)
 
   // Keep Leaflet's cached container size in sync with reality. Without this,
   // any resize that happens after init (ribbon mounts after first frame,
@@ -1170,20 +1265,30 @@ function makePinIcon(glyph, extra = '') {
 }
 
 function addPointMarker(p) {
+  // "maybe" pins render dimmer + thinner ring so the high-priority ("must")
+  // pins read as the primary signal on a dense map. Legacy pins (priority
+  // null) use the default styling.
+  const extra = p.priority === 'maybe' ? 'is-maybe' : ''
   const m = L.marker([p.lat, p.lng], {
-    icon: makePinIcon(emojiByCategory[p.category] || '📍'),
-  }).addTo(leaflet)
+    icon: makePinIcon(emojiByCategory[p.category] || '📍', extra),
+    opacity: p.priority === 'maybe' ? 0.6 : 1,
+  })
+  // Stash on the marker so re-styles after edits know what to compare against.
+  m._priority = p.priority || null
   m.on('click', (e) => {
     L.DomEvent.stop(e)
     openDetail(p)
   })
+  if (clusterGroup.value) clusterGroup.value.addLayer(m)
+  else m.addTo(leaflet)
   pointMarkers.set(p.id, m)
 }
 
 function removePointMarker(id) {
   const m = pointMarkers.get(id)
   if (m) {
-    leaflet.removeLayer(m)
+    if (clusterGroup.value) clusterGroup.value.removeLayer(m)
+    else leaflet.removeLayer(m)
     pointMarkers.delete(id)
   }
 }
@@ -1271,6 +1376,54 @@ async function finalizeSoftDelete(shouldCommit) {
 }
 
 function undoDelete() { finalizeSoftDelete(false) }
+
+// Global undo (Cmd/Ctrl+Z) — a stack of mutation reversers. Deletes already
+// have a 5s soft-delete toast with its own Undo button; the global stack
+// covers the rest (add/edit pin, add/edit day, attach/detach, bulk import,
+// title rename). Most undo handlers are async because they round-trip the
+// server, but the keystroke fires-and-forgets to keep the UI snappy.
+const undoStack = ref([])
+const undoFlash = ref('')
+let _undoFlashTimer = null
+const UNDO_STACK_MAX = 30
+
+function pushUndo(label, fn) {
+  if (typeof fn !== 'function') return
+  const stack = [...undoStack.value, { label, fn }]
+  if (stack.length > UNDO_STACK_MAX) stack.shift()
+  undoStack.value = stack
+}
+
+async function runUndo() {
+  if (!undoStack.value.length) return
+  const next = [...undoStack.value]
+  const entry = next.pop()
+  undoStack.value = next
+  try {
+    await entry.fn()
+    undoFlash.value = `Undid: ${entry.label}`
+  } catch (e) {
+    error.value = e?.message || `Could not undo: ${entry.label}`
+    undoFlash.value = `Could not undo: ${entry.label}`
+  }
+  if (_undoFlashTimer) clearTimeout(_undoFlashTimer)
+  _undoFlashTimer = setTimeout(() => { undoFlash.value = '' }, 2200)
+}
+
+function onGlobalKeydown(e) {
+  // Cmd+Z (mac) / Ctrl+Z (others), but skip when the user is typing into a
+  // form field — the browser's native undo for text input is more useful
+  // there than reverting a server-side mutation.
+  const isUndo = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey
+  if (!isUndo) return
+  const tag = (e.target?.tagName || '').toLowerCase()
+  if (['input', 'textarea', 'select'].includes(tag) || e.target?.isContentEditable) return
+  if (!undoStack.value.length) return
+  e.preventDefault()
+  runUndo()
+}
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 
 onBeforeUnmount(() => {
   // If we leave the page mid-undo-window, commit so the server stays in sync
@@ -1419,26 +1572,15 @@ async function importGpxFile(file) {
 // Itinerary -----------------------------------------------------------
 const today = computed(() => todayISO())
 
-// Format an absolute Date as HH:MM in the local civil time at the given
-// longitude — mean solar time approximation, accurate enough for sunrise/
-// sunset display when the user is browsing from a different timezone.
-function fmtHMatLng(d, lng) {
-  const utcMin = d.getUTCHours() * 60 + d.getUTCMinutes()
-  const offsetMin = Math.round(lng / 15) * 60
-  const total = ((utcMin + offsetMin) % 1440 + 1440) % 1440
-  const h = Math.floor(total / 60)
-  const m = total % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
 function attachSun(banner) {
   if (!banner) return banner
   if (window.matchMedia('(max-width: 720px)').matches) return banner
   const lat = banner.day.lat ?? mapData.value?.center_lat
   const lng = banner.day.lng ?? mapData.value?.center_lng
   if (lat == null || lng == null) return banner
-  const t = SunCalc.getTimes(new Date(banner.day.date), lat, lng)
+  const t = SunCalc.getTimes(new Date(banner.day.date + 'T12:00:00Z'), lat, lng)
   if (!t.sunrise || !t.sunset || isNaN(t.sunrise) || isNaN(t.sunset)) return banner
-  return { ...banner, sun: { rise: fmtHMatLng(t.sunrise, lng), set: fmtHMatLng(t.sunset, lng) } }
+  return { ...banner, sun: { rise: formatTime(t.sunrise, lat, lng), set: formatTime(t.sunset, lat, lng) } }
 }
 
 // Reverse-geocoded fallback names per day id, populated on demand for days
@@ -1676,6 +1818,10 @@ async function onAddDay(payload) {
     const day = await api.addItineraryDay(slug.value, payload)
     if (!mapData.value.itinerary) mapData.value.itinerary = []
     mapData.value.itinerary = [...mapData.value.itinerary, day].sort((a, b) => a.date.localeCompare(b.date))
+    pushUndo(`add stop "${day.label || day.date}"`, async () => {
+      await api.deleteItineraryDay(slug.value, day.id)
+      mapData.value.itinerary = (mapData.value.itinerary || []).filter((d) => d.id !== day.id)
+    })
   } catch (e) { error.value = e.message }
 }
 
@@ -1713,6 +1859,13 @@ async function onAddTrailPin(t) {
     }
     activeId.value = created.id
     detail.value = { ...created }
+    pushUndo(`add trail "${created.title || 'trail'}"`, async () => {
+      await api.deletePoint(slug.value, created.id)
+      mapData.value.points = mapData.value.points.filter((p) => p.id !== created.id)
+      if (created.gpx_data) removeTrackLine(created.id)
+      else removePointMarker(created.id)
+      if (detail.value?.id === created.id) { detail.value = null; activeId.value = null }
+    })
   } catch (e) { error.value = e.message }
 }
 
@@ -1743,12 +1896,27 @@ async function onAddDaysBulk(payload) {
   const replace = Array.isArray(payload) ? false : !!payload?.replace
   if (!rows?.length) return
   try {
+    const before = [...(mapData.value.itinerary || [])]
     const created = await api.addItineraryDaysBulk(slug.value, rows, { replace })
     if (!mapData.value.itinerary || replace) mapData.value.itinerary = []
     mapData.value.itinerary = [...mapData.value.itinerary, ...created].sort((a, b) => a.date.localeCompare(b.date))
     // Re-fit the map so the user sees their newly imported trip.
     await nextTick()
     fitToContent()
+    const ids = created.map((d) => d.id)
+    pushUndo(`paste import (${created.length} stop${created.length === 1 ? '' : 's'})`, async () => {
+      // Best-effort: drop the rows we just created. If `replace` was used,
+      // the prior rows are gone server-side already and can't be revived.
+      for (const id of ids) {
+        try { await api.deleteItineraryDay(slug.value, id) } catch { /* swallow */ }
+      }
+      mapData.value.itinerary = (mapData.value.itinerary || []).filter((d) => !ids.includes(d.id))
+      if (!replace) return
+      // Restore the locally-known previous state if we wiped it. Server-side
+      // rows already deleted by `replace=true` won't come back, but at least
+      // the in-memory list matches what the user can see.
+      mapData.value.itinerary = [...mapData.value.itinerary, ...before].sort((a, b) => a.date.localeCompare(b.date))
+    })
   } catch (e) { error.value = e.message }
 }
 
@@ -1775,10 +1943,28 @@ async function onDeleteDay(day) {
 }
 
 async function onAttachPoint({ pointId, dayId }) {
+  const before = mapData.value.points.find((p) => p.id === pointId)
+  const prevDayId = before?.itinerary_day_id ?? null
   await patchPointDay(pointId, dayId)
+  if (prevDayId !== dayId) {
+    pushUndo(`attach pin`, async () => {
+      const restored = await api.patchPoint(slug.value, pointId, { itinerary_day_id: prevDayId })
+      const idx = mapData.value.points.findIndex((p) => p.id === pointId)
+      if (idx >= 0) mapData.value.points.splice(idx, 1, restored)
+    })
+  }
 }
 async function onDetachPoint(pointId) {
+  const before = mapData.value.points.find((p) => p.id === pointId)
+  const prevDayId = before?.itinerary_day_id ?? null
   await patchPointDay(pointId, null)
+  if (prevDayId != null) {
+    pushUndo(`detach pin`, async () => {
+      const restored = await api.patchPoint(slug.value, pointId, { itinerary_day_id: prevDayId })
+      const idx = mapData.value.points.findIndex((p) => p.id === pointId)
+      if (idx >= 0) mapData.value.points.splice(idx, 1, restored)
+    })
+  }
 }
 async function patchPointDay(pointId, dayId) {
   try {
@@ -1790,6 +1976,8 @@ async function patchPointDay(pointId, dayId) {
 
 async function onPatchDay(day, payload) {
   try {
+    const before = mapData.value.itinerary?.find((d) => d.id === day.id)
+    const prevSnapshot = before ? { ...before } : null
     const updated = await api.patchItineraryDay(slug.value, day.id, payload)
     const idx = (mapData.value.itinerary || []).findIndex((d) => d.id === day.id)
     if (idx >= 0) {
@@ -1797,6 +1985,25 @@ async function onPatchDay(day, payload) {
       mapData.value.itinerary = [...mapData.value.itinerary].sort((a, b) => a.date.localeCompare(b.date))
     }
     editingDay.value = null
+    if (prevSnapshot) {
+      pushUndo(`edit "${prevSnapshot.label || prevSnapshot.date}"`, async () => {
+        const revertPayload = {
+          date: prevSnapshot.date,
+          end_date: prevSnapshot.end_date,
+          label: prevSnapshot.label,
+          lat: prevSnapshot.lat,
+          lng: prevSnapshot.lng,
+          notes: prevSnapshot.notes,
+          photos: prevSnapshot.photos,
+        }
+        const restored = await api.patchItineraryDay(slug.value, day.id, revertPayload)
+        const i = (mapData.value.itinerary || []).findIndex((d) => d.id === day.id)
+        if (i >= 0) {
+          mapData.value.itinerary[i] = { ...mapData.value.itinerary[i], ...restored }
+          mapData.value.itinerary = [...mapData.value.itinerary].sort((a, b) => a.date.localeCompare(b.date))
+        }
+      })
+    }
   } catch (e) { error.value = e.message }
 }
 
@@ -1929,14 +2136,29 @@ async function onSave(payload) {
   if (!modal.value) return
   try {
     if (modal.value.id) {
+      const before = mapData.value.points.find((p) => p.id === modal.value.id)
+      const prevSnapshot = before ? { ...before } : null
       const updated = await api.patchPoint(slug.value, modal.value.id, payload)
       const idx = mapData.value.points.findIndex((p) => p.id === updated.id)
       if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
       removePointMarker(updated.id)
       addPointMarker(updated)
-      // Re-open detail with the updated content.
       detail.value = { ...updated }
       activeId.value = updated.id
+      if (prevSnapshot) {
+        pushUndo(`edit "${updated.title || 'untitled'}"`, async () => {
+          const restored = await api.patchPoint(slug.value, updated.id, {
+            title: prevSnapshot.title,
+            comment: prevSnapshot.comment,
+            category: prevSnapshot.category,
+            priority: prevSnapshot.priority ?? null,
+          })
+          const i = mapData.value.points.findIndex((p) => p.id === restored.id)
+          if (i >= 0) mapData.value.points.splice(i, 1, restored)
+          removePointMarker(restored.id)
+          addPointMarker(restored)
+        })
+      }
     } else {
       const created = await api.addPoint(slug.value, {
         ...payload,
@@ -1947,6 +2169,12 @@ async function onSave(payload) {
       addPointMarker(created)
       activeId.value = created.id
       detail.value = { ...created }
+      pushUndo(`add "${created.title || 'pin'}"`, async () => {
+        await api.deletePoint(slug.value, created.id)
+        mapData.value.points = mapData.value.points.filter((p) => p.id !== created.id)
+        removePointMarker(created.id)
+        if (detail.value?.id === created.id) { detail.value = null; activeId.value = null }
+      })
     }
     modal.value = null
   } catch (e) {
@@ -1986,6 +2214,11 @@ async function onAddPinToDay({ dayId, lat, lng, title, category }) {
     if (!mapData.value.points) mapData.value.points = []
     mapData.value.points.push(created)
     addPointMarker(created)
+    pushUndo(`add "${created.title || 'pin'}" to day`, async () => {
+      await api.deletePoint(slug.value, created.id)
+      mapData.value.points = mapData.value.points.filter((p) => p.id !== created.id)
+      removePointMarker(created.id)
+    })
   } catch (e) { error.value = e.message }
 }
 
@@ -1994,6 +2227,34 @@ async function onAddPinToDay({ dayId, lat, lng, title, category }) {
 // patch + marker refresh.
 function onEditPin(p) {
   modal.value = { ...p }
+}
+
+// PlanView wishlist drag → ghost (empty date): create a stop on that date
+// using the pin's coords + label, then attach the pin to it. One emit, one
+// undo entry that walks both side-effects back.
+async function onSchedulePin({ pointId, date, lat, lng, title }) {
+  try {
+    const newDay = await api.addItineraryDay(slug.value, {
+      date,
+      label: (title || '').slice(0, 200) || null,
+      lat, lng,
+    })
+    if (!mapData.value.itinerary) mapData.value.itinerary = []
+    mapData.value.itinerary = [...mapData.value.itinerary, newDay].sort((a, b) => a.date.localeCompare(b.date))
+    const pin = mapData.value.points.find((p) => p.id === pointId)
+    const prevDayId = pin?.itinerary_day_id ?? null
+    const updated = await api.patchPoint(slug.value, pointId, { itinerary_day_id: newDay.id })
+    const idx = mapData.value.points.findIndex((p) => p.id === pointId)
+    if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
+    pushUndo(`schedule "${updated.title || 'pin'}" on ${date}`, async () => {
+      // Detach first so the day delete doesn't leave a dangling reference.
+      const restoredPin = await api.patchPoint(slug.value, pointId, { itinerary_day_id: prevDayId })
+      const i = mapData.value.points.findIndex((p) => p.id === pointId)
+      if (i >= 0) mapData.value.points.splice(i, 1, restoredPin)
+      await api.deleteItineraryDay(slug.value, newDay.id)
+      mapData.value.itinerary = (mapData.value.itinerary || []).filter((d) => d.id !== newDay.id)
+    })
+  } catch (e) { error.value = e.message }
 }
 
 // PlanView's wishlist × button — funnel into the same soft-delete machinery
@@ -2871,6 +3132,34 @@ onBeforeUnmount(() => {
   /* Override the centred del-toast keyframes so this slides in from the
      button (no horizontal nudge). */
   transform: translateY(-6px);
+}
+
+/* Cmd/Ctrl+Z confirmation — sits next to the share toast so the user gets
+   a brief "↶ Undid: …" affordance without obscuring the bottom-centre
+   delete-toast. Same ink/cream palette as the others; auto-dismisses. */
+.undo-toast {
+  position: absolute;
+  bottom: 1rem;
+  left: 1rem;
+  z-index: 950;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.5rem 0.85rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: calc(100% - 2rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.undo-toast.toast-enter-from,
+.undo-toast.toast-leave-to {
+  transform: translateY(8px);
+  opacity: 0;
 }
 
 </style>

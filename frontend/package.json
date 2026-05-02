@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
     "suncalc": "^1.9.0",
+    "tz-lookup": "^6.1.25",
     "vite-plugin-pwa": "^1.2.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",

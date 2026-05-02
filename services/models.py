@@ -53,6 +53,8 @@ class Point(Base):
     itinerary_day_id: Mapped[int | None] = mapped_column(
         ForeignKey("itinerary_days.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # "must" (must-see) or "maybe"; null for legacy pins with no priority set.
+    priority: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     map: Mapped[Map] = relationship(back_populates="points")

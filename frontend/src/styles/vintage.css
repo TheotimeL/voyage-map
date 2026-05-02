@@ -215,6 +215,12 @@ input[type="range"]::-moz-range-thumb {
   width: 38px; height: 38px;
 }
 
+/* "Maybe" priority — quieter ring so must-see pins read as primary. */
+.pin-wrapper.is-maybe .pin {
+  border-width: 1.5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
 /* When the row is active, pop the matching pin: scale + ink ring */
 .pin-wrapper.is-active .pin {
   transform: translateY(-2px) scale(1.15);
@@ -346,6 +352,40 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   font-size: 0.95rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.18);
+}
+
+/* Survival "Save as pin" popup — same cream/ink palette as the rest of the
+   editor controls. Single button for one-click save. */
+.survival-popup {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 140px;
+  text-align: center;
+}
+.sp-pop-title {
+  font-family: var(--display);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.sp-pop-save {
+  background: var(--vermillion);
+  color: var(--paper);
+  border: none;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.65rem;
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow: 0 1px 0 var(--vermillion-deep);
+}
+.sp-pop-save:hover { background: var(--vermillion-deep); }
+.sp-pop-save:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  box-shadow: none;
 }
 
 /* "You are here" blue dot (Apple/Google Maps style) */

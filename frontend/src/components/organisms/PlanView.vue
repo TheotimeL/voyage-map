@@ -59,7 +59,7 @@
         No stops yet — add the first one above.
       </div>
 
-      <table v-else class="plan-table" :class="{ 'is-dragging': dragSourceId != null }">
+      <table v-else class="plan-table" :class="{ 'is-dragging': dragSourceId != null || dragPinId != null }">
         <thead>
           <tr>
             <th class="c-grip" aria-hidden="true"></th>
@@ -203,6 +203,19 @@
                       @click.stop="toggleLocationPopover(r.day.id)"
                     >⌖ {{ r.day.lat == null ? 'set' : 'change' }}</button>
                   </div>
+                  <p
+                    v-if="forecastFor(r.day)"
+                    class="place-wx mono"
+                    :title="`Forecast for ${r.day.date}`"
+                  >
+                    {{ glyphFor(forecastFor(r.day).code) }}
+                    {{ forecastFor(r.day).tMax }}° / {{ forecastFor(r.day).tMin }}°<template v-if="forecastFor(r.day).precip > 0.5"> · {{ forecastFor(r.day).precip.toFixed(1) }}mm</template>
+                  </p>
+                  <p
+                    v-else-if="weatherTooFar(r.day)"
+                    class="place-wx mono is-faded"
+                    :title="`Forecasts available within 16 days from today`"
+                  >· weather in {{ weatherTooFar(r.day) }}d</p>
                 </div>
                 <div v-if="locationPopoverFor === r.day.id" class="popover-anchor">
                   <div class="loc-popover paper" @click.stop>
@@ -343,8 +356,11 @@
           v-for="p in visiblePins"
           :key="p.id"
           class="pin-card"
-          :class="{ 'is-trail': !!p.gpx_data }"
+          :class="{ 'is-trail': !!p.gpx_data, 'is-dragged': dragPinId === p.id }"
           :style="p.gpx_data && p.color ? { '--swatch': p.color } : null"
+          draggable="true"
+          @dragstart="onPinDragStart(p, $event)"
+          @dragend="onPinDragEnd"
           @click="emit('edit-pin', p)"
         >
           <button
@@ -389,6 +405,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { CATEGORIES, formatLat, formatLng, parseGPX, todayISO } from '@/util.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { fmtMinutes, routeLeg } from '@/lib/routing.js'
+import { dailyForecast, glyphFor } from '@/lib/weather.js'
 import { reverseGeocode } from '@/api.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 import CategoryFilters from '../molecules/CategoryFilters.vue'
@@ -404,6 +421,7 @@ const emit = defineEmits([
   'update:title',
   'add-day', 'delete-day', 'patch-day', 'edit-day',
   'add-pin', 'attach-pin', 'detach-pin', 'edit-pin', 'delete-pin',
+  'schedule-pin',
   'open-paste',
 ])
 
@@ -681,28 +699,42 @@ function toggleMobileExpand(id) {
 // Ghost rows + drag-to-reorder ------------------------------------------------
 // The native HTML5 drag API only fires drag events on elements with
 // draggable=true. We bind that to the row only while a grip is held — letting
-// inputs inside the row stay clickable/selectable normally.
+// inputs inside the row stay clickable/selectable normally. A second drag
+// source — `.pin-card` from the wishlist — sets `dragPinId` instead and the
+// drop handlers branch on which one is set.
 const dragSourceId = ref(null)
+const dragPinId = ref(null)
 const dropTargetKey = ref(null)
 function onRowDragStart(r, e) {
   if (r.isGhost) return
   dragSourceId.value = r.day.id
+  dragPinId.value = null
   e.dataTransfer.effectAllowed = 'move'
   // Required for Firefox to fire dragstart at all.
-  try { e.dataTransfer.setData('text/plain', String(r.day.id)) } catch {}
+  try { e.dataTransfer.setData('text/plain', `row:${r.day.id}`) } catch {}
 }
 function onRowDragEnd() {
   dragSourceId.value = null
   dropTargetKey.value = null
 }
+function onPinDragStart(p, e) {
+  dragPinId.value = p.id
+  dragSourceId.value = null
+  e.dataTransfer.effectAllowed = 'move'
+  try { e.dataTransfer.setData('text/plain', `pin:${p.id}`) } catch {}
+}
+function onPinDragEnd() {
+  dragPinId.value = null
+  dropTargetKey.value = null
+}
 function onRowDragOver(r, e) {
-  if (dragSourceId.value == null) return
-  if (r.day.id === dragSourceId.value) return
+  if (dragSourceId.value == null && dragPinId.value == null) return
+  if (dragSourceId.value != null && r.day.id === dragSourceId.value) return
   e.dataTransfer.dropEffect = 'move'
   dropTargetKey.value = r.key
 }
 function onGhostDragOver(r, e) {
-  if (dragSourceId.value == null) return
+  if (dragSourceId.value == null && dragPinId.value == null) return
   e.dataTransfer.dropEffect = 'move'
   dropTargetKey.value = r.key
 }
@@ -716,8 +748,15 @@ function shiftDate(iso, deltaDays) {
 }
 function onRowDrop(targetRow) {
   const srcId = dragSourceId.value
+  const pinId = dragPinId.value
   dragSourceId.value = null
+  dragPinId.value = null
   dropTargetKey.value = null
+  // Wishlist pin → existing stop row: attach.
+  if (pinId != null) {
+    emit('attach-pin', { pointId: pinId, dayId: targetRow.day.id })
+    return
+  }
   if (srcId == null || targetRow.day.id === srcId) return
   const src = (props.days || []).find((d) => d.id === srcId)
   const tgt = targetRow.day
@@ -734,8 +773,18 @@ function onRowDrop(targetRow) {
 }
 function onGhostDrop(ghostRow) {
   const srcId = dragSourceId.value
+  const pinId = dragPinId.value
   dragSourceId.value = null
+  dragPinId.value = null
   dropTargetKey.value = null
+  // Wishlist pin → empty date: ask MapView to create a stop on that date
+  // anchored to the pin's coords + label, and attach the pin to it.
+  if (pinId != null) {
+    const pin = (props.points || []).find((p) => p.id === pinId)
+    if (!pin) return
+    emit('schedule-pin', { pointId: pin.id, date: ghostRow.date, lat: pin.lat, lng: pin.lng, title: pin.title })
+    return
+  }
   if (srcId == null) return
   const src = (props.days || []).find((d) => d.id === srcId)
   if (!src) return
@@ -747,6 +796,28 @@ function onGhostDrop(ghostRow) {
 function addStopOnDate(iso) {
   emit('add-day', { date: iso, label: null })
 }
+
+// Per-row weather forecast (lazy, capped to the 16-day Open-Meteo horizon).
+// Same pattern as Itinerary.vue's `wxMap` so the trip's full week-by-week
+// outlook is visible in the table; the chip appears as fetches resolve.
+const wxMap = ref({})
+function forecastFor(d) { return wxMap.value[d.id] || null }
+const FORECAST_HORIZON_DAYS = 16
+function weatherTooFar(d) {
+  if (!d.date) return 0
+  const ms = new Date(d.date).getTime() - new Date(today.value).getTime()
+  const days = Math.ceil(ms / (24 * 3600 * 1000))
+  return days > FORECAST_HORIZON_DAYS ? days - FORECAST_HORIZON_DAYS : 0
+}
+async function refreshWeather(days) {
+  for (const d of days) {
+    if (d.id == null || d.lat == null || d.lng == null) continue
+    if (wxMap.value[d.id]) continue
+    const wx = await dailyForecast(d.lat, d.lng, d.date)
+    if (wx) wxMap.value = { ...wxMap.value, [d.id]: wx }
+  }
+}
+watch(() => props.days, (next) => { refreshWeather(next || []) }, { immediate: true })
 
 // Driving legs (cached per pair). Computed locally to avoid plumbing the cache
 // from MapView; the data is derived from props.days so it refreshes with edits.
@@ -1317,6 +1388,13 @@ function trailStats(p) {
   font-weight: 400;
 }
 .place-loc-missing { color: var(--vermillion); font-style: italic; }
+.place-wx {
+  margin: 0.05rem 0 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+.place-wx.is-faded { color: var(--ink-faded); font-style: italic; }
 .loc-btn {
   background: transparent;
   border: 1px dashed var(--cream-edge);
@@ -1650,6 +1728,9 @@ function trailStats(p) {
   transform: translate(-1px, -1px);
 }
 .pin-card.is-trail { border-left: 4px solid var(--swatch, var(--ink-faded)); }
+.pin-card { cursor: grab; }
+.pin-card:active { cursor: grabbing; }
+.pin-card.is-dragged { opacity: 0.4; transform: scale(0.97); }
 .pin-card-del {
   position: absolute;
   top: 4px;

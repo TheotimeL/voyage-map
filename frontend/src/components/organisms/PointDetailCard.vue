@@ -7,6 +7,16 @@
       <div>
         <p class="eyebrow">{{ catLabel }}</p>
         <h3 class="title">{{ point.title || `Untitled ${catLabel.toLowerCase()}` }}</h3>
+        <span
+          v-if="point.priority === 'must'"
+          class="prio-chip prio-must"
+          title="Must-see — high priority"
+        >★ Must-see</span>
+        <span
+          v-else-if="point.priority === 'maybe'"
+          class="prio-chip prio-maybe"
+          title="Maybe — nice to have"
+        >○ Maybe</span>
       </div>
     </div>
 
@@ -137,6 +147,19 @@ function onDirections() {
   line-height: 1.05;
   text-transform: uppercase;
 }
+.prio-chip {
+  display: inline-block;
+  margin-top: 0.3rem;
+  padding: 0.08rem 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  line-height: 1.4;
+}
+.prio-chip.prio-must { color: var(--vermillion); }
+.prio-chip.prio-maybe { color: var(--ink-faded); }
 
 .comment {
   font-size: 0.96rem;
