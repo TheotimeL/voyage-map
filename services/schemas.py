@@ -15,7 +15,7 @@ class PointIn(BaseModel):
     lat: float
     lng: float
     title: str | None = Field(default=None, max_length=120)
-    comment: str | None = Field(default=None, max_length=2000)
+    comment: str | None = Field(default=None, max_length=20_000)
     category: CATEGORIES = "note"
     gpx_data: str | None = Field(default=None, max_length=10_000_000)
     color: str | None = Field(default=None, max_length=20)
@@ -27,7 +27,7 @@ class PointPatch(BaseModel):
     lat: float | None = None
     lng: float | None = None
     title: str | None = Field(default=None, max_length=120)
-    comment: str | None = Field(default=None, max_length=2000)
+    comment: str | None = Field(default=None, max_length=20_000)
     category: CATEGORIES | None = None
     gpx_data: str | None = Field(default=None, max_length=10_000_000)
     color: str | None = Field(default=None, max_length=20)
@@ -71,10 +71,7 @@ class ItineraryDayIn(BaseModel):
     label: str | None = Field(default=None, max_length=200)
     lat: float | None = None
     lng: float | None = None
-    notes: str | None = Field(default=None, max_length=500)
-    # JSON array of base64 data-URLs. Soft cap enforced at the field level to
-    # keep individual rows manageable in SQLite (~5 MB).
-    photos: str | None = Field(default=None, max_length=5_000_000)
+    notes: str | None = Field(default=None, max_length=20_000)
 
 
 class ItineraryDayPatch(BaseModel):
@@ -83,8 +80,7 @@ class ItineraryDayPatch(BaseModel):
     label: str | None = Field(default=None, max_length=200)
     lat: float | None = None
     lng: float | None = None
-    notes: str | None = Field(default=None, max_length=500)
-    photos: str | None = Field(default=None, max_length=5_000_000)
+    notes: str | None = Field(default=None, max_length=20_000)
 
 
 class ItineraryDayOut(BaseModel):
@@ -97,7 +93,6 @@ class ItineraryDayOut(BaseModel):
     lat: float | None
     lng: float | None
     notes: str | None
-    photos: str | None = None
 
 
 class MapOut(BaseModel):

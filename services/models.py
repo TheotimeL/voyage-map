@@ -43,7 +43,7 @@ class Point(Base):
     lat: Mapped[float] = mapped_column(Float)
     lng: Mapped[float] = mapped_column(Float)
     title: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    comment: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str] = mapped_column(String(20), default="note")
     gpx_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -75,10 +75,7 @@ class ItineraryDay(Base):
     label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    # Photo journal: JSON array of base64 data-URLs ("data:image/jpeg;base64,…").
-    # Storing inline keeps the snapshot self-contained for offline sync; the
-    # tradeoff is row size — the schema cap (5 MB) is a soft fence per stop.
-    photos: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # `photos` column removed — photos now live inline in `notes` markdown.
 
     map: Mapped[Map] = relationship(back_populates="itinerary")
