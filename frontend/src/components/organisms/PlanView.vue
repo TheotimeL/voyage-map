@@ -12,7 +12,11 @@
             @blur="emit('update:title', titleDraft)"
             @keydown.enter="$event.target.blur()"
           />
-          <p v-if="metaLine" class="plan-meta mono">{{ metaLine }}</p>
+          <p
+            v-if="metaLine"
+            class="plan-meta mono"
+            title="Days planned = calendar span (start → end). Scheduled = days that actually have a stop assigned."
+          >{{ metaLine }}</p>
         </div>
         <div class="plan-head-actions">
           <slot name="mode-toggle" />
@@ -669,10 +673,34 @@ const totalDriveMin = computed(() => {
   }
   return sum
 })
+// Calendar span: earliest start_date → latest end_date, inclusive. This is
+// the "trip length on the wall calendar" — distinct from `totalNights`, which
+// only sums the days that actually have a stop scheduled. A 21-day road trip
+// with only 10 stop-days would otherwise read as "10 days", which contradicts
+// the start/end dates and reliably confuses people.
+const calendarSpan = computed(() => {
+  const days = props.days || []
+  if (!days.length) return 0
+  let min = days[0].date
+  let max = endOf(days[0])
+  for (const d of days) {
+    if (d.date < min) min = d.date
+    const e = endOf(d)
+    if (e > max) max = e
+  }
+  return Math.round((new Date(max) - new Date(min)) / 86400000) + 1
+})
 const metaLine = computed(() => {
   const parts = []
-  if (props.days?.length) parts.push(`${totalNights.value} day${totalNights.value === 1 ? '' : 's'}`)
-  if (props.days?.length) parts.push(`${props.days.length} stop${props.days.length === 1 ? '' : 's'}`)
+  if (props.days?.length) {
+    parts.push(`${calendarSpan.value} day${calendarSpan.value === 1 ? '' : 's'} planned`)
+    // Only call out "scheduled" when it differs from the calendar span —
+    // otherwise the two numbers are the same and the extra pill is noise.
+    if (totalNights.value && totalNights.value !== calendarSpan.value) {
+      parts.push(`${totalNights.value} scheduled`)
+    }
+    parts.push(`${props.days.length} stop${props.days.length === 1 ? '' : 's'}`)
+  }
   if (totalDriveKm.value > 0) parts.push(`${totalDriveKm.value.toLocaleString()} km · ${fmtMinutes(totalDriveMin.value)}`)
   if ((props.points || []).length) parts.push(`${props.points.length} pin${props.points.length === 1 ? '' : 's'}`)
   return parts.join(' · ')
