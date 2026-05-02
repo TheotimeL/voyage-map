@@ -26,3 +26,6 @@ frontend/.vite/
 # Dev symlinks (worktree only)
 .venv
 node_modules
+
+# Local uploads dir for image storage (mirrors /data/uploads on Render)
+uploads/
