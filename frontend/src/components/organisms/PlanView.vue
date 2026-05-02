@@ -802,7 +802,10 @@ function addStopOnDate(iso) {
 // outlook is visible in the table; the chip appears as fetches resolve.
 const wxMap = ref({})
 function forecastFor(d) { return wxMap.value[d.id] || null }
-const FORECAST_HORIZON_DAYS = 16
+// Open-Meteo's forecast_days=16 returns 16 entries — today plus 15 days
+// out — so the last forecastable date is today+15. Anything from day 16+
+// is "too far" and gets the muted placeholder.
+const FORECAST_HORIZON_DAYS = 15
 function weatherTooFar(d) {
   if (!d.date) return 0
   const ms = new Date(d.date).getTime() - new Date(today.value).getTime()
