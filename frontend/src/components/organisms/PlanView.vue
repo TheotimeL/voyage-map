@@ -28,45 +28,19 @@
     <section class="plan-stops">
       <div class="plan-stops-head">
         <h2 class="plan-h2">Stops</h2>
-        <div class="plan-stops-actions">
-          <button
-            class="btn btn-tiny"
-            type="button"
-            :aria-expanded="addOpen"
-            aria-controls="plan-add-panel"
-            @click="addOpen = !addOpen"
-          >{{ addOpen ? '× Close' : '+ Add stop' }}</button>
-          <button class="btn btn-tiny btn-ghost" type="button" @click="emit('open-paste')">Paste import…</button>
-        </div>
       </div>
 
-      <Transition name="reveal">
-        <section v-if="addOpen" id="plan-add-panel" class="add-row">
-          <form class="add-form" @submit.prevent="addEmptyStop">
-            <input
-              v-model="addDate"
-              type="date"
-              class="field add-date"
-              :min="firstISO"
-              :max="lastISO"
-              required
-            />
-            <button
-              class="btn btn-tiny"
-              type="submit"
-              title="Add a stop without a date — fill in later"
-            >+ Unplaced stop</button>
-          </form>
-          <GeocoderSearch
-            placeholder="Or search a place for that date…"
-            :bias="bias"
-            @pick="onAddSearchPick"
+      <div v-if="!rows.length" class="plan-empty">
+        <p class="mono">No stops yet — start your trip</p>
+        <form class="empty-form" @submit.prevent="addEmptyStop">
+          <input
+            v-model="addDate"
+            type="date"
+            class="field add-date"
+            required
           />
-        </section>
-      </Transition>
-
-      <div v-if="!rows.length" class="plan-empty mono">
-        No stops yet — add the first one above.
+          <button class="btn btn-tiny" type="submit">+ Begin trip</button>
+        </form>
       </div>
 
       <table v-else class="plan-table" :class="{ 'is-dragging': dragSourceId != null || dragPinId != null }">
@@ -74,18 +48,20 @@
           <tr>
             <th class="c-grip" aria-hidden="true"></th>
             <th class="c-date">Date</th>
-            <th class="c-day">Day</th>
+            <th class="c-day">D</th>
             <th class="c-place">Stop</th>
+            <th class="c-location">Location</th>
+            <th class="c-sleep">Sleep</th>
+            <th class="c-wx">Wx</th>
             <th class="c-notes">Notes</th>
-            <th class="c-pins">Pins</th>
-            <th class="c-leg">Drive next</th>
+            <th class="c-leg">Drive</th>
             <th class="c-act"></th>
           </tr>
         </thead>
         <tbody>
           <template v-for="r in rows" :key="r.key">
             <tr v-if="r.weekHeader" class="plan-week">
-              <td colspan="8">
+              <td colspan="9">
                 <span class="week-tag mono">Week {{ r.weekNum }}</span>
                 <span class="week-meta mono">{{ r.weekRange }}</span>
                 <span v-if="r.weekSummary" class="week-summary mono">{{ r.weekSummary }}</span>
@@ -108,13 +84,37 @@
                 </div>
               </td>
               <td class="c-day mono">—</td>
-              <td class="c-place ghost-place" colspan="4">
+              <td class="c-place ghost-place" colspan="7">
                 <button class="ghost-add mono" type="button" @click="addStopOnDate(r.date)">
                   + add stop on {{ r.dayNum }} {{ r.mon }}
                 </button>
-                <span class="ghost-hint mono">drop a wishlist pin to schedule it</span>
               </td>
               <td class="c-act"></td>
+            </tr>
+            <tr
+              v-else-if="r.isPin"
+              class="plan-row plan-pin-row"
+              @click="emit('edit-pin', r.pin)"
+            >
+              <td class="c-grip"></td>
+              <td class="c-date pin-indent" colspan="2">
+                <span class="pin-row-arrow mono" aria-hidden="true">↳</span>
+                <span class="pin-row-emoji">{{ pinEmoji(r.pin) }}</span>
+              </td>
+              <td class="c-place pin-name">
+                <span class="pin-row-title">{{ r.pin.title || 'Untitled pin' }}</span>
+                <span v-if="r.pin.comment" class="pin-row-comment mono">— {{ markdownExcerpt(r.pin.comment, 60) }}</span>
+              </td>
+              <td class="c-location" colspan="5"></td>
+              <td class="c-act">
+                <button
+                  class="iti-icon"
+                  type="button"
+                  title="Detach from this stop"
+                  aria-label="Detach pin"
+                  @click.stop="emit('detach-pin', r.pin.id)"
+                >−</button>
+              </td>
             </tr>
             <tr
               v-else
@@ -126,7 +126,6 @@
                 'is-selected': selectedDayId === r.day.id,
                 'is-dragged': dragSourceId === r.day.id,
                 'drop-target': dropTargetKey === r.key,
-                'is-expanded': mobileExpanded.has(r.day.id),
               }"
               @dragover.prevent="onRowDragOver(r, $event)"
               @dragleave="onRowDragLeave(r)"
@@ -134,6 +133,7 @@
             >
               <td class="c-grip">
                 <span
+                  v-if="!r.isContinuation"
                   class="grip"
                   draggable="true"
                   :title="`Drag to reorder ${r.cleanLabel || r.day.label || 'this stop'}`"
@@ -141,105 +141,127 @@
                   role="button"
                   @dragstart="onRowDragStart(r, $event)"
                   @dragend="onRowDragEnd"
-                >⋮⋮</span>
+                >⋮</span>
               </td>
               <td class="c-date">
-                <label class="date-cell" :title="`Click to change start date`">
+                <label class="date-cell" :title="`Click to change date`">
                   <input
                     type="date"
                     class="date-cell-input themed-date"
-                    :value="r.day.date"
+                    :value="r.dayDate"
                     :min="firstISO"
                     :max="lastISO"
-                    @change="onDateChange(r.day, $event.target.value)"
+                    @change="onDayDateChange(r, $event.target.value)"
                   />
-                  <span class="d-dow mono">{{ r.dow }}</span>
-                  <span class="d-num">{{ r.dayNum }}</span>
-                  <span class="d-mon mono">{{ r.mon }}</span>
-                  <span v-if="r.spanLabel" class="d-span mono">{{ r.spanLabel }}</span>
+                  <span class="d-inline mono"><span class="d-dow">{{ r.dow }}</span> <span class="d-num">{{ r.dayNum }}</span> <span class="d-mon">{{ r.mon }}</span></span>
                 </label>
-                <button
-                  class="end-edit mono"
-                  type="button"
-                  :title="r.endLabel ? `Change end date (currently ${r.endLabel})` : `Extend this stop to multiple days`"
-                  @click.stop="openEndPicker(r.day)"
-                >{{ r.endLabel ? `→ ${r.endLabel}` : '+ extend' }}</button>
-                <input
-                  v-if="endPickerFor === r.day.id"
-                  type="date"
-                  class="end-picker themed-date"
-                  :value="r.day.end_date || r.day.date"
-                  :min="r.day.date"
-                  ref="endPickerEl"
-                  @change="onEndDateChange(r.day, $event.target.value)"
-                  @blur="endPickerFor = null"
-                />
-                <button
-                  type="button"
-                  class="mobile-expand mono"
-                  :title="mobileExpanded.has(r.day.id) ? 'Collapse' : 'Expand'"
-                  @click.stop="toggleMobileExpand(r.day.id)"
-                >{{ mobileExpanded.has(r.day.id) ? '▴' : '▾' }}</button>
               </td>
               <td class="c-day mono">{{ r.dayLabel }}</td>
               <td class="c-place">
                 <div class="place-cell">
-                  <span class="mobile-name">{{ r.cleanLabel || r.day.label || 'Untitled stop' }}</span>
                   <input
                     class="cell-input cell-name"
                     :value="r.cleanLabel || r.day.label || ''"
-                    :placeholder="r.day.lat == null ? 'Untitled stop' : 'Name (e.g. First night Vegas)'"
+                    :placeholder="r.day.lat == null ? 'Untitled stop' : 'Name…'"
                     @blur="onLabelBlur(r.day, $event.target.value)"
                     @keydown.enter="$event.target.blur()"
                   />
-                  <p v-if="r.legNext" class="mobile-summary mono" aria-hidden="true">
-                    <template v-if="r.legNext.real">
-                      ↓ {{ formatDistance(r.legNext.real.km) }} · {{ fmtMinutesTight(r.legNext.real.minutes) }}
-                    </template>
-                    <template v-else>↓ ≈ {{ formatDistance(r.legNext.km) }}</template>
-                  </p>
-                  <div class="place-loc">
-                    <em
-                      v-if="r.day.lat != null"
-                      class="place-loc-text"
-                      :title="`${formatLat(r.day.lat)} · ${formatLng(r.day.lng)}`"
-                    >{{ placeNameFor(r.day) || `${formatLat(r.day.lat)} · ${formatLng(r.day.lng)}` }}</em>
-                    <em v-else class="place-loc-text place-loc-missing">no coords yet</em>
-                    <button
-                      class="loc-btn mono"
-                      type="button"
-                      :class="{ on: locationPopoverFor === r.day.id, missing: r.day.lat == null }"
-                      :title="r.day.lat == null ? 'Set the location for this stop' : 'Change the location for this stop'"
-                      @click.stop="toggleLocationPopover(r.day.id)"
-                    >⌖ {{ r.day.lat == null ? 'set' : 'change' }}</button>
-                  </div>
-                  <p
-                    v-for="(wx, i) in spanWeather(r.day)"
-                    :key="wx.date"
-                    class="place-wx mono"
-                    :class="{ 'is-faded': !wx.forecast }"
-                    :title="`Forecast for ${wx.date}`"
-                  >
-                    <span v-if="spanWeather(r.day).length > 1" class="wx-tag">{{ wx.tag }}</span>
-                    <template v-if="wx.forecast">
-                      {{ glyphFor(wx.forecast.code) }}
-                      {{ formatTempValue(wx.forecast.tMax) }}° / {{ formatTempValue(wx.forecast.tMin) }}°<template v-if="wx.forecast.precip > 0.5"> · {{ wx.forecast.precip.toFixed(1) }}mm</template>
-                    </template>
-                    <template v-else-if="wx.tooFarDays != null">· weather in {{ wx.tooFarDays }}d</template>
-                  </p>
+                  <button
+                    v-if="!r.isContinuation && (pinsByDay.get(r.day.id) || []).length"
+                    class="pin-toggle mono"
+                    type="button"
+                    :title="(pinExpanded.has(r.day.id) ? 'Hide pins' : 'Show pins')"
+                    @click.stop="togglePinExpand(r.day.id)"
+                  >{{ pinExpanded.has(r.day.id) ? '▾' : '▸' }} {{ (pinsByDay.get(r.day.id) || []).length }}</button>
+                  <button
+                    v-if="!r.isContinuation"
+                    class="pin-toggle pin-add mono"
+                    type="button"
+                    :class="{ on: popoverFor === r.day.id }"
+                    title="Add a pin to this stop"
+                    @click.stop="togglePopover(r.day.id)"
+                  >+</button>
                 </div>
+                <div v-if="!r.isContinuation && popoverFor === r.day.id" class="popover-anchor">
+                  <DayAddPinPopover
+                    :day="r.day"
+                    :day-label="r.day.label || r.dayLabel"
+                    :all-points="points"
+                    :days="days"
+                    :bias="bias"
+                    @close="popoverFor = null"
+                    @add-new="onAddPinNew(r.day, $event)"
+                    @attach="onAttachPin(r.day, $event)"
+                  />
+                </div>
+                <button
+                  v-if="!r.isContinuation"
+                  class="row-insert above mono"
+                  type="button"
+                  title="Insert a new stop above"
+                  aria-label="Insert a new stop above this row"
+                  @click.stop="insertAbove(r)"
+                >+</button>
+                <span
+                  v-if="!r.isContinuation"
+                  class="row-insert below"
+                  :title="`Add the next day — choose new stop or extend ${r.cleanLabel || r.day.label || 'this stop'}`"
+                >
+                  <button
+                    type="button"
+                    class="row-insert-btn extend mono"
+                    title="Extend this stop by one day"
+                    aria-label="Extend stop"
+                    @click.stop="extendBelow(r)"
+                  >↪</button>
+                  <button
+                    type="button"
+                    class="row-insert-btn new mono"
+                    title="Insert a new stop below"
+                    aria-label="Insert a new stop below"
+                    @click.stop="insertBelow(r)"
+                  >+</button>
+                </span>
+              </td>
+              <td class="c-location">
+                <button
+                  type="button"
+                  class="cell-location"
+                  :class="{ on: locationPopoverFor === r.day.id, missing: r.day.lat == null }"
+                  :title="r.day.lat == null ? 'Set the location' : (placeNameFor(r.day) || 'Change the location')"
+                  @click.stop="toggleLocationPopover(r.day.id)"
+                >{{ r.day.lat != null ? (placeNameFor(r.day) || `${formatLat(r.day.lat)} · ${formatLng(r.day.lng)}`) : '—' }}</button>
                 <div v-if="locationPopoverFor === r.day.id" class="popover-anchor">
                   <div class="loc-popover paper" @click.stop>
-                    <p class="dap-eyebrow mono">Set the location for this stop</p>
+                    <p class="dap-eyebrow mono">Set the location</p>
                     <GeocoderSearch
                       placeholder="Search a town, viewpoint, campground…"
                       :bias="bias"
                       @pick="onLocationPick(r.day, $event)"
                     />
-                    <p class="loc-popover-hint mono">Picks a place — sets coords only, your stop name stays as-is.</p>
                     <button type="button" class="loc-popover-close mono" @click="locationPopoverFor = null">cancel</button>
                   </div>
                 </div>
+              </td>
+              <td class="c-sleep">
+                <input
+                  class="cell-input"
+                  :value="r.day.sleep_location || ''"
+                  placeholder="—"
+                  maxlength="200"
+                  :title="r.day.sleep_location || 'Where you sleep that night (free text)'"
+                  @blur="onSleepBlur(r.day, $event.target.value)"
+                  @keydown.enter="$event.target.blur()"
+                />
+              </td>
+              <td class="c-wx mono">
+                <span
+                  v-if="r.wxForDay && r.wxForDay.forecast"
+                  class="wx-chip"
+                  :title="`${r.wxForDay.date} forecast`"
+                >{{ glyphFor(r.wxForDay.forecast.code) }} {{ formatTempValue(r.wxForDay.forecast.tMax) }}°/{{ formatTempValue(r.wxForDay.forecast.tMin) }}°</span>
+                <span v-else-if="r.wxForDay && r.wxForDay.tooFarDays != null" class="wx-faded">+{{ r.wxForDay.tooFarDays }}d</span>
+                <span v-else class="wx-faded">—</span>
               </td>
               <td class="c-notes">
                 <button
@@ -248,81 +270,31 @@
                   :class="{ 'is-empty': !r.day.notes }"
                   :title="r.day.notes ? 'Open journal' : 'Add a journal entry'"
                   @click="emit('edit-day', r.day)"
-                >{{ r.day.notes ? markdownExcerpt(r.day.notes, 80) : '—' }}</button>
-              </td>
-              <td class="c-pins">
-                <div class="pins-cell">
-                  <ul v-if="(pinsByDay.get(r.day.id) || []).length" class="pin-chips">
-                    <li
-                      v-for="p in pinsByDay.get(r.day.id)"
-                      :key="p.id"
-                      class="pin-chip"
-                      :title="p.comment || p.title"
-                      @click="emit('edit-pin', p)"
-                    >
-                      <span class="pin-chip-emoji">{{ pinEmoji(p) }}</span>
-                      <span class="pin-chip-title">{{ p.title || 'Untitled' }}</span>
-                      <button
-                        class="pin-chip-detach"
-                        type="button"
-                        title="Detach from this stop"
-                        @click.stop="emit('detach-pin', p.id)"
-                      >−</button>
-                    </li>
-                  </ul>
-                  <button
-                    class="add-pin-btn mono"
-                    type="button"
-                    :class="{ on: popoverFor === r.day.id }"
-                    @click.stop="togglePopover(r.day.id)"
-                  >+ pin</button>
-                  <div v-if="popoverFor === r.day.id" class="popover-anchor">
-                    <DayAddPinPopover
-                      :day="r.day"
-                      :day-label="r.day.label || r.dayLabel"
-                      :all-points="points"
-                      :days="days"
-                      :bias="bias"
-                      @close="popoverFor = null"
-                      @add-new="onAddPinNew(r.day, $event)"
-                      @attach="onAttachPin(r.day, $event)"
-                    />
-                  </div>
-                </div>
+                >{{ r.day.notes ? markdownExcerpt(r.day.notes, 60) : '—' }}</button>
               </td>
               <td class="c-leg mono">
                 <template v-if="r.legNext && r.legNext.real">
-                  <div class="leg-cell" :class="{ 'is-short': r.legNext.real.km < 5, 'is-long': r.legNext.real.minutes >= 180 || r.legNext.real.km >= 250 }">
-                    <span class="leg-km">{{ formatDistance(r.legNext.real.km) }}</span>
-                    <span class="leg-time">{{ fmtMinutesTight(r.legNext.real.minutes) }}</span>
-                    <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
-                  </div>
+                  <span class="leg-cell" :class="{ 'is-short': r.legNext.real.km < 5, 'is-long': r.legNext.real.minutes >= 180 || r.legNext.real.km >= 250 }">{{ formatDistance(r.legNext.real.km) }} · {{ fmtMinutesTight(r.legNext.real.minutes) }}</span>
                 </template>
-                <template v-else-if="r.legNext">
-                  <div class="leg-cell">
-                    <span class="leg-km leg-faded">≈ {{ formatDistance(r.legNext.km) }}</span>
-                  </div>
-                </template>
+                <span v-else-if="r.legNext" class="leg-faded">≈ {{ formatDistance(r.legNext.km) }}</span>
                 <span v-else class="leg-faded">—</span>
               </td>
               <td class="c-act">
-                <div class="row-actions">
-                  <button
-                    v-if="pendingDeleteId !== r.day.id"
-                    class="iti-icon"
-                    type="button"
-                    title="Remove this stop"
-                    aria-label="Remove this stop"
-                    @click="armDelete(r.day)"
-                  >×</button>
-                  <button
-                    v-else
-                    class="iti-icon iti-icon-confirm mono"
-                    type="button"
-                    title="Click again to confirm — there's a 5 second undo afterwards"
-                    @click="confirmDelete(r.day)"
-                  >Delete?</button>
-                </div>
+                <button
+                  v-if="!r.isContinuation && pendingDeleteId !== r.day.id"
+                  class="iti-icon"
+                  type="button"
+                  title="Remove this stop"
+                  aria-label="Remove this stop"
+                  @click="armDelete(r.day)"
+                >×</button>
+                <button
+                  v-else-if="!r.isContinuation"
+                  class="iti-icon iti-icon-confirm mono"
+                  type="button"
+                  title="Click again to confirm"
+                  @click="confirmDelete(r.day)"
+                >×?</button>
               </td>
             </tr>
           </template>
@@ -407,7 +379,7 @@ import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { fmtMinutes, routeLeg } from '@/lib/routing.js'
 import { dailyForecast, glyphFor } from '@/lib/weather.js'
 import { formatDistance, formatTempValue } from '@/lib/settings.js'
-import { reverseGeocode } from '@/api.js'
+import { reverseGeocodeLabel, geocode as forwardGeocode } from '@/api.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 import CategoryFilters from '../molecules/CategoryFilters.vue'
 import DayAddPinPopover from './DayAddPinPopover.vue'
@@ -555,6 +527,15 @@ const selectedDayId = computed(() => popoverFor.value)
 function togglePopover(id) {
   popoverFor.value = popoverFor.value === id ? null : id
 }
+
+// Expand/collapse pin sub-rows under each stop. Set of day ids whose pins
+// are currently shown as indented child rows.
+const pinExpanded = ref(new Set())
+function togglePinExpand(id) {
+  const next = new Set(pinExpanded.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  pinExpanded.value = next
+}
 function onAddPinNew(day, payload) {
   emit('add-pin', { dayId: day.id, ...payload })
   popoverFor.value = null
@@ -609,7 +590,7 @@ async function refreshPlaceNames(days) {
   for (const d of days) {
     if (d.id == null || d.lat == null || d.lng == null) continue
     if (placeNames.value[d.id]) continue
-    const name = await reverseGeocode(d.lat, d.lng)
+    const name = await reverseGeocodeLabel(d.lat, d.lng)
     if (name) placeNames.value = { ...placeNames.value, [d.id]: name }
   }
 }
@@ -625,8 +606,12 @@ function toggleLocationPopover(id) {
 }
 function onLocationPick(day, result) {
   emit('patch-day', { day, payload: { lat: result.lat, lng: result.lng } })
-  // Drop the cached reverse-geocoded name — it'll re-fetch with the new coords.
-  if (placeNames.value[day.id]) {
+  // Seed the cache with the picked result's full label — that's what the user
+  // just selected, so it should be the displayed location text. (Otherwise we
+  // 'd display the old reverse-geocode name until the next refresh.)
+  if (result.label) {
+    placeNames.value = { ...placeNames.value, [day.id]: result.label }
+  } else if (placeNames.value[day.id]) {
     const next = { ...placeNames.value }
     delete next[day.id]
     placeNames.value = next
@@ -637,7 +622,7 @@ function onLocationPick(day, result) {
 // Click-outside handler — closes both popovers when the user taps elsewhere.
 function onDocClick(e) {
   if (popoverFor.value == null && locationPopoverFor.value == null) return
-  const inside = e.target.closest?.('.popover-anchor, .add-pin-btn, .loc-btn')
+  const inside = e.target.closest?.('.popover-anchor, .add-pin-btn, .loc-btn, .cell-location, .pin-add')
   if (!inside) { popoverFor.value = null; locationPopoverFor.value = null }
 }
 import { onMounted, onBeforeUnmount } from 'vue'
@@ -645,11 +630,68 @@ onMounted(() => document.addEventListener('click', onDocClick, true))
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true))
 
 // Inline label / notes edits — only patch when the value actually changed.
-function onLabelBlur(day, value) {
+// Side effect: when the stop has no coords yet, forward-geocode the label
+// and set lat/lng from the first result. User can override via the Location
+// column popover. We don't re-geocode on subsequent label edits — that would
+// surprise the user by moving their pin every time they tweak the name.
+async function onLabelBlur(day, value) {
   const next = (value || '').trim()
   const current = (day.label || '').trim()
   if (next === current) return
   emit('patch-day', { day, payload: { label: next || null } })
+  if (next && day.lat == null) {
+    try {
+      const results = await forwardGeocode(next, props.bias)
+      if (results && results.length > 0) {
+        const top = results[0]
+        emit('patch-day', { day, payload: { lat: top.lat, lng: top.lng } })
+        // Seed the location-display cache so the Location column shows the
+        // full geocoded label immediately (no second round-trip to reverse).
+        if (top.label) placeNames.value = { ...placeNames.value, [day.id]: top.label }
+      }
+    } catch (_) { /* silent — user can pick manually from Location popover */ }
+  }
+}
+function onSleepBlur(day, value) {
+  const next = (value || '').trim()
+  const current = (day.sleep_location || '').trim()
+  if (next === current) return
+  emit('patch-day', { day, payload: { sleep_location: next || null } })
+}
+
+// Hover-row insertion. The new stop's date is suggested from the neighbour:
+// "above" = day before this row's start; "below" = day after this row's end.
+// If the suggested date overlaps an existing stop, the API responds 409 and
+// MapView surfaces an error toast — the user can then pick another date via
+// the top "+ Add stop" panel.
+function insertAbove(row) {
+  if (!row?.day) return
+  const iso = shiftDate(row.day.date, -1)
+  emit('add-day', { date: iso, label: null })
+}
+function insertBelow(row) {
+  if (!row?.day) return
+  const iso = shiftDate(endOf(row.day), 1)
+  emit('add-day', { date: iso, label: null })
+}
+// Extend the stop's span by one day instead of creating a new neighbour stop.
+// Used by the "↪" button next to "+" in the row's below-hover affordance.
+function extendBelow(row) {
+  if (!row?.day) return
+  const newEnd = shiftDate(endOf(row.day), 1)
+  emit('patch-day', { day: row.day, payload: { end_date: newEnd } })
+}
+// Date edit on any day-row, including continuations. Editing a continuation
+// date shifts the whole stop by the same delta (so the chosen day lands on
+// the new date). This keeps the span intact.
+function onDayDateChange(row, newDate) {
+  if (!newDate || !row?.day) return
+  if (newDate === row.dayDate) return
+  const delta = Math.round((new Date(newDate) - new Date(row.dayDate)) / 86400000)
+  if (!delta) return
+  const payload = { date: shiftDate(row.day.date, delta) }
+  if (row.day.end_date) payload.end_date = shiftDate(row.day.end_date, delta)
+  emit('patch-day', { day: row.day, payload })
 }
 // Notes cell: read-only excerpt that opens the day modal (full markdown
 // editor) on click. The plan table stays scannable; rich notes/photos live
@@ -888,12 +930,13 @@ const rows = computed(() => {
   }
   const out = []
   let lastWeekNum = 0
+  // Per-stop loop emits one row per calendar day in the span. The first day
+  // of a span is the editable parent; subsequent days are continuation rows
+  // (visually muted; date + weather only).
   for (let i = 0; i < sorted.length; i++) {
     const day = sorted[i]
     const next = i < sorted.length - 1 ? sorted[i + 1] : null
     const span = daysInSpan(day.date, endOf(day))
-    // Trip-day index is the calendar offset from the trip's first stop date,
-    // so a stop on May 9 of a May-6-start trip reads "D4", not "D2".
     const startNum = daysBetween(sorted[0].date, day.date) + 1
     const endNum = startNum + span - 1
     const dayLabel = span > 1 ? `D${startNum}–${endNum}` : `D${startNum}`
@@ -923,24 +966,48 @@ const rows = computed(() => {
       }
       lastWeekNum = weekNum
     }
-    out.push({
-      key: `d:${day.id}`,
-      isGhost: false,
-      day,
-      dayLabel,
-      cleanLabel,
-      legNext,
-      dow: shortDow(day.date),
-      dayNum: shortDay(day.date),
-      mon: shortMonth(day.date),
-      spanLabel,
-      endLabel: span > 1 ? `${shortDay(endOf(day))} ${shortMonth(endOf(day))}` : '',
-      isToday: today.value >= day.date && today.value <= endOf(day),
-      isPast: endOf(day) < today.value,
-      isFuture: day.date > today.value,
-      weekHeader, weekNum, weekRange, weekSummary,
-    })
+    // Emit one row per calendar day in the span. The first day is the
+    // editable parent; subsequent days are continuation rows (visually
+    // muted, only date + weather populated). Drive-next leg only attaches
+    // to the LAST day of the span (the actual departure day).
+    for (let off = 0; off < span; off++) {
+      const isoDate = shiftDate(day.date, off)
+      const isContinuation = off > 0
+      const isLastDay = off === span - 1
+      const wxForDay = {
+        date: isoDate,
+        forecast: wxMap.value[`${day.id}:${isoDate}`] || null,
+        tooFarDays: tooFarDaysFor(isoDate),
+      }
+      const dayOffset = Math.floor((new Date(isoDate) - tripStart) / 86400000)
+      const weekNumDay = Math.floor(dayOffset / 7) + 1
+      out.push({
+        key: `d:${day.id}:${off}`,
+        isGhost: false,
+        isContinuation,
+        isLastDayOfSpan: isLastDay,
+        day,
+        dayDate: isoDate,
+        dayLabel: isContinuation ? '' : dayLabel,
+        cleanLabel,
+        legNext: isLastDay ? legNext : null,
+        dow: shortDow(isoDate),
+        dayNum: shortDay(isoDate),
+        mon: shortMonth(isoDate),
+        wxForDay,
+        isToday: today.value === isoDate,
+        isPast: isoDate < today.value,
+        isFuture: isoDate > today.value,
+        weekNum: weekNumDay,
+      })
+    }
   }
+  // Pin sub-row injection happens after the day-row + ghost-row merge below
+  // so we can splice them in at the right place. Marker: keep a weekHeader
+  // pass-through for the merge phase.
+  for (const r of out) { r.weekHeader = false }
+  // First-of-week marker for sequential weeks (used after merge)
+  // (computed during the merge pass)
 
   // Inject ghost rows for unscheduled dates between the first stop and the
   // last stop's end, so a "May 2-22 trip" with a gap between May 11 and May
@@ -977,44 +1044,57 @@ const rows = computed(() => {
       isFuture: iso > today.value,
     })
   }
-  if (!ghostRows.length) return out
-
-  // Merge sorted by date — ghosts slot between real rows. Rebuild week headers
-  // so the leading row of each week (real or ghost) carries the divider.
+  // Merge real day-rows + ghost rows in date order. Each iso-date now maps
+  // to exactly one row (per-day expansion makes stop dates unique across
+  // real rows; ghosts only fill uncovered dates).
   const realByDate = new Map()
-  for (const r of out) realByDate.set(r.day.date, r)
+  for (const r of out) realByDate.set(r.dayDate, r)
   const ghostByDate = new Map()
   for (const g of ghostRows) ghostByDate.set(g.date, g)
   const allDates = [...realByDate.keys(), ...ghostByDate.keys()].sort()
   const merged = []
   let lastWk = 0
-  const weekRangesByNum = new Map()
-  const weekSummariesByNum = new Map()
-  for (const r of out) {
-    if (r.weekHeader) {
-      weekRangesByNum.set(r.weekNum, r.weekRange)
-      weekSummariesByNum.set(r.weekNum, r.weekSummary)
-    }
-  }
-  for (const date of allDates) {
-    const row = realByDate.get(date) || ghostByDate.get(date)
+  for (const iso of allDates) {
+    const row = realByDate.get(iso) || ghostByDate.get(iso)
     const wk = row.weekNum
-    if (wk !== lastWk) {
+    // First row of a new week wears the divider. Continuation day-rows
+    // never get headers (they're under the parent's week).
+    if (wk !== lastWk && !row.isContinuation) {
       row.weekHeader = true
-      let range = weekRangesByNum.get(wk)
-      if (!range) {
-        const ws = new Date(tripStart)
-        ws.setUTCDate(ws.getUTCDate() + (wk - 1) * 7)
-        const we = new Date(ws); we.setUTCDate(we.getUTCDate() + 6)
-        range = `${ws.getUTCDate()}–${we.getUTCDate()} ${shortMonth(we.toISOString().slice(0, 10))}`
+      const ws = new Date(tripStart)
+      ws.setUTCDate(ws.getUTCDate() + (wk - 1) * 7)
+      const we = new Date(ws); we.setUTCDate(we.getUTCDate() + 6)
+      row.weekRange = `${ws.getUTCDate()}–${we.getUTCDate()} ${shortMonth(we.toISOString().slice(0, 10))}`
+      const wsSum = weekStats.get(wk)
+      if (wsSum) {
+        const km = Math.round(wsSum.km)
+        const stopsLbl = `${wsSum.stops} stop${wsSum.stops === 1 ? '' : 's'}`
+        row.weekSummary = km > 0 ? `${stopsLbl} · ${formatDistance(km)}` : stopsLbl
+      } else {
+        row.weekSummary = ''
       }
-      row.weekRange = range
-      row.weekSummary = weekSummariesByNum.get(wk) || row.weekSummary || ''
       lastWk = wk
     } else {
       row.weekHeader = false
     }
     merged.push(row)
+    // Splice pin sub-rows in just after a stop's last calendar day, when
+    // the user has expanded that stop's pin dropdown.
+    if (!row.isGhost && row.isLastDayOfSpan) {
+      const dayId = row.day.id
+      if (pinExpanded.value.has(dayId)) {
+        const pins = pinsByDay.value.get(dayId) || []
+        for (const p of pins) {
+          merged.push({
+            key: `p:${dayId}:${p.id}`,
+            isGhost: false,
+            isPin: true,
+            parentDayId: dayId,
+            pin: p,
+          })
+        }
+      }
+    }
   }
   return merged
 })
@@ -1098,17 +1178,22 @@ function trailStats(p) {
 .plan {
   position: relative;
   min-height: 100vh;
-  padding: 1.4rem 1.6rem 4rem;
+  padding: 0.5rem 0 1rem;
   display: grid;
-  gap: 2rem;
+  gap: 0.5rem;
+  align-content: start;
   background: var(--paper);
 }
-.plan-head { display: grid; gap: 0.6rem; }
+.plan-head { padding: 0 0.6rem; }
+.plan-stops, .plan-pins { padding: 0; }
+.plan-stops-head, .plan-pins-head, .plan-empty { padding-left: 0.6rem; padding-right: 0.6rem; }
+.plan-head { display: grid; gap: 0.2rem; }
 .plan-head-row {
   display: flex;
   align-items: flex-start;
+  align-content: flex-start;
   justify-content: space-between;
-  gap: 1.2rem;
+  gap: 0.8rem;
   flex-wrap: wrap;
 }
 .plan-title-wrap { display: grid; gap: 0.15rem; flex: 1 1 auto; min-width: 0; }
@@ -1123,24 +1208,26 @@ function trailStats(p) {
   background: transparent;
   border: none;
   font-family: var(--display);
-  font-size: clamp(1.5rem, 3.4vw, 2.4rem);
+  font-size: clamp(1rem, 1.6vw, 1.3rem);
   letter-spacing: 0.005em;
   text-transform: uppercase;
   color: var(--ink);
   width: 100%;
-  padding: 0.05rem 0 0.1rem;
+  padding: 0;
   border-bottom: 1px dashed transparent;
+  line-height: 1.1;
 }
 .plan-title:focus {
   outline: none;
   border-bottom-color: var(--cream-edge);
 }
 .plan-meta {
-  margin: 0.2rem 0 0;
-  font-size: 0.74rem;
-  letter-spacing: 0.12em;
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-faded);
+  line-height: 1.2;
 }
 .plan-head-actions {
   display: flex;
@@ -1152,13 +1239,13 @@ function trailStats(p) {
 .plan-h2 {
   margin: 0;
   font-family: var(--display);
-  font-size: 1.15rem;
-  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink);
 }
 
-.plan-stops { display: grid; gap: 0.7rem; }
+.plan-stops { display: grid; gap: 0.25rem; }
 .plan-stops-head, .plan-pins-head {
   display: flex;
   align-items: center;
@@ -1196,7 +1283,8 @@ function trailStats(p) {
 .plan-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92rem;
+  font-size: 0.78rem;
+  table-layout: fixed;
 }
 .plan-table thead th {
   position: sticky;
@@ -1204,54 +1292,175 @@ function trailStats(p) {
   background: var(--paper);
   text-align: left;
   font-family: var(--mono);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-faded);
-  padding: 0.4rem 0.5rem;
+  padding: 0.25rem 0.4rem;
   border-bottom: 1px solid var(--ink);
   z-index: 2;
 }
 .plan-table tbody td {
-  padding: 0.5rem 0.5rem;
+  padding: 0.18rem 0.4rem;
   border-bottom: 1px solid var(--cream-edge);
-  vertical-align: top;
+  vertical-align: middle;
+  line-height: 1.25;
+  white-space: nowrap;
+  /* No overflow:hidden here — popovers rendered inside cells need to bleed
+     out below their row. Ellipsis is handled per-cell by the inner inputs /
+     button (.cell-input, .cell-location, .cell-notes-display). */
 }
+.plan-row { height: 1.85rem; }
 .plan-row.today {
-  background: rgba(232, 93, 60, 0.08);
+  background: rgba(232, 93, 60, 0.06);
 }
-.plan-row.today .c-day {
-  color: var(--vermillion-deep);
-  font-weight: 700;
-}
-.plan-row.past td { opacity: 0.55; }
+.plan-row.today .c-day { color: var(--vermillion-deep); font-weight: 700; }
+.plan-row.past td { opacity: 0.5; }
 .plan-row.is-selected { background: var(--cream); }
 .plan-row:hover { background: var(--cream); }
 
+/* (Continuation rows render the same content as their parent — no muting.
+    Edits to label/sleep/notes/location all patch the same parent stop record;
+    per-day data divergence is a future enhancement.) */
+
 .plan-week td {
-  padding: 0.7rem 0.5rem 0.4rem;
+  padding: 0.45rem 0.4rem 0.25rem;
   border-bottom: 1px solid var(--ink);
   background: var(--paper);
+  white-space: normal;
 }
 .week-tag {
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink);
   font-weight: 700;
-  margin-right: 0.6rem;
+  margin-right: 0.5rem;
 }
-.week-meta { font-size: 0.66rem; color: var(--ink-faded); margin-right: 0.6rem; }
-.week-summary { font-size: 0.66rem; color: var(--ink-faded); float: right; }
+.week-meta { font-size: 0.6rem; color: var(--ink-faded); margin-right: 0.5rem; }
+.week-summary { font-size: 0.6rem; color: var(--ink-faded); float: right; }
 
-.c-grip { width: 1.4rem; padding-right: 0 !important; padding-left: 0.2rem !important; }
-.c-date { width: 5rem; }
-.c-day { width: 4.4rem; font-size: 0.7rem; letter-spacing: 0.12em; color: var(--ink-faded); text-transform: uppercase; }
-.c-place { min-width: 11rem; }
-.c-notes { min-width: 12rem; }
-.c-pins { min-width: 16rem; }
-.c-leg { width: 7rem; font-size: 0.78rem; color: var(--ink-soft); }
-.c-act { width: 5rem; }
+.c-grip { width: 1.2rem; padding-right: 0 !important; padding-left: 0.4rem !important; }
+.c-date { width: 5.6rem; }
+.c-day { width: 2.4rem; font-size: 0.62rem; letter-spacing: 0.1em; color: var(--ink-faded); text-transform: uppercase; }
+.c-place { width: 16rem; position: relative; }
+.c-location { font-size: 0.72rem; color: var(--ink-soft); position: relative; }
+.c-sleep { width: 12rem; }
+.c-wx { width: 6.2rem; font-size: 0.72rem; color: var(--ink-soft); }
+.c-notes { width: 12rem; }
+.c-leg { width: 6.4rem; font-size: 0.7rem; color: var(--ink-soft); }
+.c-act { width: 1.6rem; padding-right: 0.6rem !important; text-align: right; }
+
+/* Location cell: italic full-display label so the user sees context, not just
+   "Clark County". Click → opens the geocoder popover. */
+.cell-location {
+  background: transparent;
+  border: 1px dashed transparent;
+  border-radius: 3px;
+  padding: 0.08rem 0.3rem;
+  font: inherit;
+  font-style: italic;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cell-location:hover { border-color: var(--cream-edge); color: var(--ink); }
+.cell-location.on { border-color: var(--ink); background: var(--paper); }
+.cell-location.missing { color: var(--vermillion); font-style: italic; }
+
+/* Single-line date display: "SAT 9 MAY". The native date input is overlayed
+   transparently so clicking the cell opens the picker. */
+.d-inline { display: inline-flex; gap: 0.3rem; align-items: baseline; font-size: 0.74rem; letter-spacing: 0.04em; font-family: var(--mono); }
+.d-inline .d-dow { color: var(--ink-faded); font-size: 0.7rem; font-family: var(--mono); letter-spacing: 0.06em; }
+.d-inline .d-num { font-weight: 600; color: var(--ink); font-size: 0.82rem; font-family: var(--mono); letter-spacing: 0; }
+.d-inline .d-mon { color: var(--ink-faded); font-size: 0.7rem; font-family: var(--mono); letter-spacing: 0.06em; }
+.d-inline.is-cont { opacity: 0.6; }
+
+/* Pin sub-row — indented under parent, click → edit. */
+.plan-pin-row { background: rgba(0, 0, 0, 0.02); cursor: pointer; }
+.plan-pin-row:hover { background: var(--cream); }
+.plan-pin-row td { padding: 0.12rem 0.4rem; }
+.pin-indent { padding-left: 1.6rem !important; color: var(--ink-faded); }
+.pin-row-arrow { margin-right: 0.3rem; color: var(--ink-faded); }
+.pin-row-emoji { font-size: 0.85rem; }
+.pin-name { font-size: 0.76rem; }
+.pin-row-title { color: var(--ink); font-weight: 500; }
+.pin-row-comment { color: var(--ink-faded); margin-left: 0.3rem; }
+
+/* Pin dropdown affordances inside parent stop row. */
+.pin-toggle {
+  background: transparent;
+  border: 1px solid var(--cream-edge);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-faded);
+  padding: 0.05rem 0.3rem;
+  cursor: pointer;
+  margin-left: 0.2rem;
+  line-height: 1.2;
+}
+.pin-toggle:hover { color: var(--ink); border-color: var(--ink); }
+.pin-toggle.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.pin-toggle.pin-add { color: var(--vermillion); border-color: var(--vermillion); }
+
+/* Single-cell weather chip. */
+.wx-chip { font-size: 0.72rem; color: var(--ink); }
+.wx-faded { font-size: 0.7rem; color: var(--ink-faded); }
+
+/* Hover-row insert buttons — small "+" affordances above and below each real
+ * row that surface on hover. Anchored to c-place (which is the only cell
+ * `position: relative`) so they sit roughly in the middle of the row width. */
+/* Row-insert affordances. Above = single "+" (insert NEW stop above).
+   Below = pair of buttons "↪" (extend this stop +1 day) and "+" (insert NEW
+   stop after this stop). All hover-only; pinned to row mid-edges. */
+.row-insert {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  display: inline-flex;
+  gap: 0.2rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.row-insert.above { top: 0; }
+.row-insert.below { top: 100%; }
+.plan-row:hover .row-insert,
+.row-insert:focus-within { opacity: 1; pointer-events: auto; }
+
+/* Single-button "above" affordance is itself a button (no wrapper) — inherit
+   the same round chip styling as the paired buttons. */
+button.row-insert,
+.row-insert-btn {
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button.row-insert:hover,
+.row-insert-btn:hover {
+  background: var(--vermillion);
+  color: var(--paper);
+  border-color: var(--vermillion);
+}
+.row-insert-btn.extend { font-size: 0.7rem; }
 
 .date-cell {
   position: relative;
@@ -1824,6 +2033,68 @@ function trailStats(p) {
 }
 .pin-card-trail { color: var(--swatch, var(--ink-faded)); font-weight: 600; }
 
+/* ───── M4 sheet-density overrides ──────────────────────────────────────────
+   Flatten legacy card-style cells (date grid, multi-line place cell, big
+   stop-name input) into single-line spreadsheet cells. Targets every selector
+   that bumps row height. */
+.plan-table tbody td.c-place,
+.plan-table tbody td.c-sleep,
+.plan-table tbody td.c-notes,
+.plan-table tbody td.c-wx,
+.plan-table tbody td.c-leg { vertical-align: middle; }
+.date-cell {
+  display: inline-block;
+  position: relative;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.date-cell:hover { background: transparent; border: none; }
+.place-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.cell-name {
+  font-size: 0.78rem !important;
+  font-weight: 500 !important;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cell-input { padding: 0.08rem 0.3rem; font-size: 0.78rem; line-height: 1.25; }
+.cell-input:focus { box-shadow: none; }
+.cell-notes-display {
+  padding: 0.08rem 0.3rem;
+  font-size: 0.74rem;
+  line-height: 1.25;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loc-btn {
+  padding: 0.05rem 0.3rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.grip { font-size: 0.85rem; color: var(--ink-faded); cursor: grab; }
+.iti-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+}
+.leg-cell { font-size: 0.7rem; }
+.row-insert { width: 1.05rem; height: 1.05rem; font-size: 0.72rem; }
+
 @media (max-width: 720px) {
   .plan { padding: 1rem 0.9rem 4rem; gap: 1.4rem; }
   .plan-table thead { display: none; }
@@ -1843,13 +2114,17 @@ function trailStats(p) {
   .plan-row .c-date { grid-column: 1 / 2; grid-row: 1 / span 6; }
   .plan-row .c-day,
   .plan-row .c-place,
+  .plan-row .c-sleep,
+  .plan-row .c-wx,
   .plan-row .c-notes,
-  .plan-row .c-pins,
   .plan-row .c-leg,
   .plan-row .c-act { grid-column: 2 / 3; }
   .plan-row .c-day { display: none; } /* day index already implied by date column */
   .plan-week td { background: transparent; border: none; }
-  .c-grip, .c-date, .c-day, .c-place, .c-notes, .c-pins, .c-leg, .c-act { width: auto; }
+  .c-grip, .c-date, .c-day, .c-place, .c-sleep, .c-wx, .c-notes, .c-leg, .c-act { width: auto; max-width: none; }
+  /* Hover-insert buttons rely on hover — useless on touch and visually
+     cramped inside the mobile card layout. */
+  .row-insert { display: none; }
   .c-act { display: flex; justify-content: flex-end; }
   .pins-cell { flex-direction: row; }
   .plan-row .c-grip { display: none; }
@@ -1863,8 +2138,9 @@ function trailStats(p) {
   /* Collapsed state: row reads as date · name · drive — everything else
      hidden until the user taps the chevron. Brings a 21-stop trip from
      ~12,000px tall down to ~3,500px scrollable list. */
+  .plan-row:not(.is-expanded):not(.plan-ghost) .c-sleep,
+  .plan-row:not(.is-expanded):not(.plan-ghost) .c-wx,
   .plan-row:not(.is-expanded):not(.plan-ghost) .c-notes,
-  .plan-row:not(.is-expanded):not(.plan-ghost) .c-pins,
   .plan-row:not(.is-expanded):not(.plan-ghost) .c-act,
   .plan-row:not(.is-expanded):not(.plan-ghost) .end-edit,
   .plan-row:not(.is-expanded):not(.plan-ghost) .end-picker,

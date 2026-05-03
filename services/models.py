@@ -76,6 +76,10 @@ class ItineraryDay(Base):
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Free-text where the user is sleeping that night ("Watchman Campground",
+    # "BLM off Hwy 9"). Intentionally not geocoded — keeps the plan-view row
+    # compact and matches van-trip vocabulary.
+    sleep_location: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # `photos` column removed — photos now live inline in `notes` markdown.
 
     map: Mapped[Map] = relationship(back_populates="itinerary")

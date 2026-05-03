@@ -68,6 +68,7 @@ export const api = {
 // opaque CORS errors.
 
 const reverseCache = new Map()
+const reverseLabelCache = new Map()
 export async function reverseGeocode(lat, lng) {
   const key = `${lat.toFixed(1)},${lng.toFixed(1)}`
   if (reverseCache.has(key)) return reverseCache.get(key)
@@ -80,9 +81,33 @@ export async function reverseGeocode(lat, lng) {
     const a = d.address || {}
     const city = a.city || a.town || a.village || a.hamlet || a.county || a.state || a.country || null
     reverseCache.set(key, city)
+    if (d.display_name) reverseLabelCache.set(key, d.display_name)
     return city
   } catch {
     reverseCache.set(key, null)
+    return null
+  }
+}
+
+// Same hit as reverseGeocode but returns the full Nominatim `display_name`
+// ("Las Vegas, Clark County, Nevada, United States") rather than the short
+// city/county-fallback string. Useful when the caller wants context, not a
+// label — the plan view's Location column uses this so a stop near Vegas
+// reads "Las Vegas, …" instead of just "Clark County".
+export async function reverseGeocodeLabel(lat, lng) {
+  const key = `${lat.toFixed(1)},${lng.toFixed(1)}`
+  if (reverseLabelCache.has(key)) return reverseLabelCache.get(key)
+  try {
+    const params = new URLSearchParams({ lat: String(lat), lng: String(lng) })
+    if (navigator.language) params.set('lang', navigator.language)
+    const res = await fetch(`/api/reverse?${params}`)
+    if (!res.ok) throw new Error('reverse ' + res.status)
+    const d = await res.json()
+    const label = d.display_name || null
+    reverseLabelCache.set(key, label)
+    return label
+  } catch {
+    reverseLabelCache.set(key, null)
     return null
   }
 }

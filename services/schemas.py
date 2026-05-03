@@ -72,6 +72,7 @@ class ItineraryDayIn(BaseModel):
     lat: float | None = None
     lng: float | None = None
     notes: str | None = Field(default=None, max_length=20_000)
+    sleep_location: str | None = Field(default=None, max_length=200)
 
 
 class ItineraryDayPatch(BaseModel):
@@ -81,6 +82,7 @@ class ItineraryDayPatch(BaseModel):
     lat: float | None = None
     lng: float | None = None
     notes: str | None = Field(default=None, max_length=20_000)
+    sleep_location: str | None = Field(default=None, max_length=200)
 
 
 class ItineraryDayOut(BaseModel):
@@ -93,6 +95,7 @@ class ItineraryDayOut(BaseModel):
     lat: float | None
     lng: float | None
     notes: str | None
+    sleep_location: str | None = None
 
 
 class MapOut(BaseModel):

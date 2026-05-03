@@ -51,6 +51,9 @@ def _migrate_inline() -> None:
         if "photos" in iti_cols:
             conn.execute(text("ALTER TABLE itinerary_days DROP COLUMN photos"))
             logger.info("Migrated: dropped itinerary_days.photos (M3 clean-slate)")
+        if "sleep_location" not in iti_cols:
+            conn.execute(text("ALTER TABLE itinerary_days ADD COLUMN sleep_location VARCHAR(200)"))
+            logger.info("Migrated: added itinerary_days.sleep_location")
 
 
 @asynccontextmanager
