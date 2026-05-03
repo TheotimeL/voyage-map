@@ -6,13 +6,15 @@
         class="btn btn-tiny btn-add-day"
         type="button"
         :class="{ open: addOpen }"
+        :aria-expanded="addOpen"
+        aria-controls="iti-add-panel"
         @click="addOpen = !addOpen"
       >{{ addOpen ? '× Close' : '+ Add stop' }}</button>
       <button class="btn btn-tiny btn-paste" type="button" @click="showPaste = true" title="Bulk import dates from a spreadsheet">Paste…</button>
     </div>
 
     <Transition name="reveal">
-      <section v-if="addOpen" class="add-inline">
+      <section v-if="addOpen" id="iti-add-panel" class="add-inline">
         <form class="iti-add" @submit.prevent="addEmptyDay">
           <input
             v-model="form.date"
@@ -41,8 +43,8 @@
       {{ totalNights }} {{ totalNights === 1 ? 'day' : 'days' }} · {{ days.length }} {{ days.length === 1 ? 'stop' : 'stops' }}
       <template v-if="todayDayNum"> · Day {{ todayDayNum }} / {{ totalNights }}</template>
       <template v-else-if="firstFutureIdx >= 0"> · {{ daysUntil(days[firstFutureIdx].date) }}</template>
-      <template v-if="totalDriveKm > 0"> · {{ totalDriveKm.toLocaleString() }} km · {{ fmtMinutes(totalDriveMin) }} drive</template>
-      <template v-else-if="totalKm > 0"> · ≈ {{ totalKm.toLocaleString() }} km</template>
+      <template v-if="totalDriveKm > 0"> · {{ formatDistance(totalDriveKm) }} · {{ fmtMinutes(totalDriveMin) }} drive</template>
+      <template v-else-if="totalKm > 0"> · ≈ {{ formatDistance(totalKm) }}</template>
     </p>
 
     <ol v-if="rows.length" class="iti-list">
@@ -77,7 +79,7 @@
               <span v-if="spanWeather(r.day).length > 1" class="wx-tag">{{ wx.tag }}</span>
               <template v-if="wx.forecast">
                 {{ glyphFor(wx.forecast.code) }}
-                {{ wx.forecast.tMax }}° / {{ wx.forecast.tMin }}°
+                {{ formatTempValue(wx.forecast.tMax) }}° / {{ formatTempValue(wx.forecast.tMin) }}°
                 <template v-if="wx.forecast.precip > 0.5"> · {{ wx.forecast.precip.toFixed(1) }}mm</template>
               </template>
               <template v-else-if="wx.tooFarDays != null">· weather in {{ wx.tooFarDays }}d</template>
@@ -145,11 +147,11 @@
         >
           <template v-if="r.legNext.real">
             <template v-if="isShortLeg(r)">
-              <span class="leg-glyph" aria-hidden="true">↓</span> same area · {{ r.legNext.real.km }} km
+              <span class="leg-glyph" aria-hidden="true">↓</span> same area · {{ formatDistance(r.legNext.real.km) }}
             </template>
             <template v-else>
               <span class="leg-glyph" aria-hidden="true">{{ legIsLong(r) ? '~' : '↓' }}</span>
-              {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutes(r.legNext.real.minutes) }}
+              {{ formatDistance(r.legNext.real.km) }} · {{ fmtMinutes(r.legNext.real.minutes) }}
               <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
               <span
                 v-if="duskWarning(r)"
@@ -160,7 +162,7 @@
             </template>
           </template>
           <template v-else>
-            <span class="leg-glyph" aria-hidden="true">↓</span> ≈ {{ r.legNext.km }} km
+            <span class="leg-glyph" aria-hidden="true">↓</span> ≈ {{ formatDistance(r.legNext.km) }}
           </template>
         </div>
       </template>
@@ -186,6 +188,7 @@ import SunCalc from 'suncalc'
 import { CATEGORIES, todayISO } from '@/util.js'
 import { dailyForecast, hourlyForecast, glyphFor } from '@/lib/weather.js'
 import { formatTime, arrivalSafety } from '@/lib/sun.js'
+import { formatDistance, formatTempValue, settings as settingsRef } from '@/lib/settings.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 import PasteImportModal from './PasteImportModal.vue'
 import DayAddPinPopover from './DayAddPinPopover.vue'
@@ -420,11 +423,12 @@ async function refreshMorningHours(days) {
       }
     }
     if (best) {
-      const startStr = String(best.startHour).padStart(2, '0')
-      const endStr = String(best.endHour).padStart(2, '0')
+      const fmtH = (h) => settingsRef.timeFmt === '12h'
+        ? `${((h + 11) % 12) + 1}${h >= 12 ? 'p' : 'a'}`
+        : String(h).padStart(2, '0')
       morningMap.value = {
         ...morningMap.value,
-        [d.id]: `${startStr}–${endStr} · ${best.meanTemp}°`,
+        [d.id]: `${fmtH(best.startHour)}–${fmtH(best.endHour)} · ${formatTempValue(best.meanTemp)}°`,
       }
     }
   }
@@ -522,7 +526,9 @@ const totalKm = computed(() => {
 
 // Render rows: one row per stop, sorted by start date. Each stop owns its
 // full span; the day chip reads "DAY N" for single-day stops and "DAY N–M"
-// for multi-day stops.
+// for multi-day stops, where N is the *calendar trip-day index* — i.e.
+// (stop.date - tripStartDate) + 1. So a trip starting May 6 with stops on
+// May 6 / May 9 / May 12 reads as DAY 1 / DAY 4 / DAY 7, not D1/D2/D3.
 //   cleanLabel: strip a leading "Day N — " from any user-typed label so we
 //     don't double-print the day number in the body
 //   legNext: distance + drive estimate to the next stop (when both have coords)
@@ -551,14 +557,15 @@ const rows = computed(() => {
     weekStats.set(wn, ws)
   }
   const out = []
-  let cumulative = 0
   let lastWeekNum = 0
   for (let i = 0; i < sorted.length; i++) {
     const day = sorted[i]
     const next = i < sorted.length - 1 ? sorted[i + 1] : null
     const span = daysInSpan(day.date, endOf(day))
-    const startNum = cumulative + 1
-    const endNum = cumulative + span
+    // Trip-day index is the calendar offset from the trip's first date, so
+    // a stop on May 9 of a May-6-start trip reads "DAY 4", not "DAY 2".
+    const startNum = daysBetween(sorted[0].date, day.date) + 1
+    const endNum = startNum + span - 1
     const dayLabel = span > 1 ? `DAY ${startNum}–${endNum}` : `DAY ${startNum}`
     const spanISO = span > 1 ? `${day.date} → ${endOf(day)}` : day.date
     const cleanLabel = day.label
@@ -584,12 +591,11 @@ const rows = computed(() => {
       const ws = weekStats.get(weekNum)
       if (ws) {
         const km = Math.round(ws.km)
-        weekSummary = km > 0 ? `${ws.stops} stop${ws.stops === 1 ? '' : 's'} · ${km.toLocaleString()} km` : `${ws.stops} stop${ws.stops === 1 ? '' : 's'}`
+        weekSummary = km > 0 ? `${ws.stops} stop${ws.stops === 1 ? '' : 's'} · ${formatDistance(km)}` : `${ws.stops} stop${ws.stops === 1 ? '' : 's'}`
       }
       lastWeekNum = weekNum
     }
     out.push({ day, dayLabel, spanISO, cleanLabel, legNext, weekHeader, weekNum, weekRange, weekSummary })
-    cumulative += span
   }
   return out
 })
@@ -602,7 +608,7 @@ function legTitle(a, b) {
   const leg = legFor(a, b)
   if (leg) {
     const tag = leg.source === 'osrm' ? 'driving' : 'estimate (no OSRM)'
-    return `${tag}: ${leg.km} km · ${fmtMinutes(leg.minutes)}`
+    return `${tag}: ${formatDistance(leg.km)} · ${fmtMinutes(leg.minutes)}`
   }
   return `Straight-line distance from ${a.label || 'this day'} to ${b.label || 'the next day'} — actual driving will be longer.`
 }

@@ -41,6 +41,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { todayISO } from '@/util.js'
+import { formatDate } from '@/lib/settings.js'
 
 const props = defineProps({
   days: { type: Array, default: () => [] },
@@ -151,10 +152,9 @@ const rows = computed(() => {
 })
 
 function formatChip(iso) {
-  // "9 May" — short form to fit a phone-width chip.
-  const [y, m, d] = iso.split('-').map(Number)
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${d} ${months[m - 1]}`
+  // Short date form to fit a phone-width chip; respects the user's dateFmt
+  // setting ("9 May" / "May 9" / "2026-05-09").
+  return formatDate(iso)
 }
 </script>
 
@@ -298,24 +298,41 @@ function formatChip(iso) {
   letter-spacing: 0.06em;
 }
 
-/* Mobile: thinner variant — name-only chips, ~28px tall, scrollable.
-   Day-number badge and date chip are dropped to save horizontal width;
-   the "today" red fill stays so position-in-trip is still readable. */
+/* Mobile: tightest pill variant — single line "D1 · ZION", ~24px tall, so
+   ~5–6 chips fit on a 390px viewport instead of ~3. Date chip is dropped
+   to save horizontal width; the "today" red fill stays so position-in-trip
+   is still readable. The day number rejoins the name as a mono prefix. */
 @media (max-width: 720px) {
-  .ribbon { padding: 0.2rem 0.4rem 0.25rem 0; gap: 0.25rem; }
+  .ribbon { padding: 0.2rem 0.35rem 0.25rem 0; gap: 0.2rem; }
   .rib-stop {
-    min-width: 72px;
-    padding: 0.25rem 0.55rem;
+    /* Single-line layout — number prefix sits inline with the name. */
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    min-width: 0;
+    max-width: 9.5rem;
+    padding: 0.2rem 0.5rem;
     border-radius: 999px;
   }
   .rib-stop::after { display: none; }
-  .rib-num,
   .rib-date { display: none; }
+  .rib-num {
+    /* Re-show as inline prefix; condensed "D1" / "D1–3" so it stays short. */
+    display: inline;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+  }
+  .rib-num::before { content: 'D'; }
   .rib-name {
     font-family: var(--mono);
     font-size: 0.7rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+    /* Ellipsis if a name is too long; the title attribute carries the full text. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 7rem;
   }
 }
 </style>

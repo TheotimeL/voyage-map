@@ -31,10 +31,10 @@
       </template>
       <template #head-tools>
         <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
-        <ThemeToggle class="head-icon" />
+        <ThemeToggle class="head-icon hide-mobile" />
         <button class="head-icon mono" type="button" title="Tools — survival, sun, offline tiles" @click.stop="toolsOpen = !toolsOpen">⋯</button>
-        <button class="head-icon mono" type="button" title="Re-fit map to all points and days" @click="recenter">↻</button>
-        <RouterLink :to="{ path: '/', query: { home: 1 } }" class="head-icon mono" title="Start a new voyage" style="text-decoration: none;">＋</RouterLink>
+        <button class="head-icon mono hide-mobile" type="button" title="Re-fit map to all points and days" @click="recenter">↻</button>
+        <RouterLink :to="{ path: '/', query: { home: 1 } }" class="head-icon mono hide-mobile" title="Start a new voyage" style="text-decoration: none;">＋</RouterLink>
       </template>
     </PlanView>
 
@@ -78,7 +78,7 @@
             >
               <template v-if="bannerSpanWx.length > 1"><span class="banner-wx-tag">{{ wx.tag }}</span></template>
               <template v-if="wx.forecast">
-                {{ wxGlyph(wx.forecast.code) }} {{ wx.forecast.tMax }}° / {{ wx.forecast.tMin }}°
+                {{ wxGlyph(wx.forecast.code) }} {{ formatTempValue(wx.forecast.tMax) }}° / {{ formatTempValue(wx.forecast.tMin) }}°
               </template>
               <template v-else>—</template>
             </span>
@@ -125,6 +125,40 @@
         @add-stop="onFabAddStop"
       />
       <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
+
+      <!-- Persistent Tools chip strip — surfaces the survival finders + offline
+           cache without needing the user to open the ⋯ popover. Each survival
+           chip toggles its kind in the shared selected-set; turning any kind
+           on while the layer is off enables it (and vice versa: clearing the
+           last kind disables the layer). The "Offline" chip opens the Tools
+           popover focused on PrecacheButton, since a one-click cache without
+           scope/progress UI would surprise the user. Docked top-of-map on
+           desktop (sits below the banner, left of the FAB column); on mobile
+           it docks to the bottom-center, well clear of the FAB / locate-me
+           column on the right and Leaflet zoom controls on the left. -->
+      <div v-if="mapData" class="tools-strip mono" :class="{ 'with-ribbon': hasRibbon }" role="toolbar" aria-label="Map tools">
+        <button
+          v-for="k in SURVIVAL_KINDS"
+          :key="k.key"
+          type="button"
+          class="tools-strip-chip"
+          :class="{ on: survivalSelected.has(k.key) && survivalEnabled }"
+          :title="`Toggle ${k.label.toLowerCase()} finder`"
+          @click="onStripKindToggle(k.key)"
+        >
+          <span class="tools-strip-icon" aria-hidden="true">{{ k.icon }}</span>
+          <span class="tools-strip-label">{{ k.label }}</span>
+        </button>
+        <button
+          type="button"
+          class="tools-strip-chip"
+          title="Pre-cache offline tiles for this trip"
+          @click="focusToolsOffline"
+        >
+          <span class="tools-strip-icon" aria-hidden="true">⤓</span>
+          <span class="tools-strip-label">Offline</span>
+        </button>
+      </div>
 
       <Transition name="fade">
         <div v-if="gpxDragging" class="dropzone">
@@ -175,9 +209,9 @@
       <div v-if="mapData" class="map-topbar">
         <ModeToggleControl :mode="mode" @change="setMode" />
         <div class="map-topbar-actions">
-          <button v-if="hasContent" class="head-icon mono" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
+          <button v-if="hasContent" class="head-icon mono hide-mobile" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
           <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
-          <ThemeToggle class="head-icon" />
+          <ThemeToggle class="head-icon hide-mobile" />
           <button class="head-icon mono" type="button" title="Tools — survival, sun, offline tiles" @click.stop="toolsOpen = !toolsOpen">⋯</button>
         </div>
         <span v-if="offlineSnapshot" class="offline-badge mono" title="No network — showing the last copy saved on this device.">⤬ offline</span>
@@ -197,11 +231,15 @@
     </Transition>
 
     <!-- Share-copy confirmation. The ↗→✓ icon swap on the button is easy to
-         miss, so a small toast restates "Read-only link copied" near the
-         topbar for the same 1.8s window the icon stays flipped. -->
+         miss, so a top-center toast restates "Read-only link copied" for the
+         ~2s window the icon stays flipped. Hoisted to fixed top-center so it
+         is impossible to miss on a phone — the previous absolute placement
+         under the topbar pill was getting hidden behind the topbar pill itself
+         on narrow viewports. -->
     <Transition name="toast">
       <div v-if="copied" class="share-toast mono" role="status" aria-live="polite">
-        ✓ Read-only link copied
+        <span class="share-toast-tick" aria-hidden="true">✓</span>
+        <span class="share-toast-text">{{ copiedMsg }}</span>
       </div>
     </Transition>
 
@@ -232,6 +270,10 @@
           :theme="theme"
           :place-name="todayBanner?.day?.label || ''"
           :next-leg-bbox="nextLegBbox"
+          :survival-selected="survivalSelected"
+          :survival-enabled="survivalEnabled"
+          @update:survival-selected="(v) => (survivalSelected = v)"
+          @update:survival-enabled="(v) => (survivalEnabled = v)"
           @render-survival="renderSurvival"
           @clear-survival="clearSurvival"
         />
@@ -341,7 +383,9 @@ import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 import { writeSnapshot } from '@/lib/snapshot.js'
 import { extractId, buildMapSlug } from '@/lib/slug.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
+import { formatDistance, formatTempValue } from '@/lib/settings.js'
 import { buildTipNode } from '@/lib/tooltip.js'
+import { SURVIVAL_KINDS, fetchSurvival } from '@/lib/overpass.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -395,6 +439,47 @@ onBeforeUnmount(() => mqMobile.removeEventListener('change', onMqChange))
 const toolsOpen = ref(false)
 const showPaste = ref(false)
 function openPasteFromTools() { toolsOpen.value = false; showPaste.value = true }
+
+// Controlled state for the survival layer — owned here (not inside the
+// MoreMenu's SurvivalLayer) so the persistent Tools chip strip below the
+// map can drive the same set without diverging. Default kinds match what
+// the panel shipped with so the long-tested defaults are preserved.
+const survivalSelected = ref(new Set(['water', 'dump', 'toilet', 'trash']))
+const survivalEnabled = ref(false)
+function focusToolsOffline() {
+  // Bottom strip "Offline" chip: opens the Tools popover so the user lands
+  // on the PrecacheButton with all its scope toggles. Keeping the heavy
+  // pre-cache UI inside the popover (instead of inlining it on the strip)
+  // avoids cluttering the chip row with progress bars.
+  toolsOpen.value = true
+}
+
+// Click handler for the persistent Tools chip strip. Mirrors SurvivalLayer's
+// internal toggleKind but drives the layer fetch directly from here so the
+// user never has to open the ⋯ popover to discover the finders. Logic:
+//   - If layer is off and kind is being added → enable + fetch with that kind.
+//   - If layer is on and the new selected-set is non-empty → re-fetch.
+//   - If the new selected-set is empty (last chip turned off) → clear layer.
+async function onStripKindToggle(kind) {
+  const next = new Set(survivalSelected.value)
+  if (next.has(kind)) next.delete(kind)
+  else next.add(kind)
+  survivalSelected.value = next
+  if (next.size === 0) {
+    survivalEnabled.value = false
+    clearSurvival()
+    return
+  }
+  survivalEnabled.value = true
+  try {
+    const items = await fetchSurvival(getMapBounds(), [...next])
+    renderSurvival(items)
+  } catch (err) {
+    error.value = err?.message || 'Could not fetch nearby spots.'
+    survivalEnabled.value = false
+    clearSurvival()
+  }
+}
 // No emoji — the cream/ink palette plus typographic eyebrows do the visual
 // work; color emoji clash with the paper aesthetic. Glyphs below are
 // monoglyph unicode marks (chevron / pin-shape / dots) that pick up the
@@ -1089,7 +1174,20 @@ function renderItinerary() {
       offset: [10, 0],
       className: 'iti-tip',
     })
-    m.on('click', () => onGoDay(d))
+    m.on('click', (ev) => {
+      // While drop-mode is armed, day-pin clicks should drop a new pin near
+      // the day instead of focusing the day. Synthesise a map click at the
+      // marker's coordinates so the existing drop-mode flow (modal open,
+      // drop-mode toggle off) runs in one place.
+      if (dropMode.value) {
+        const ll = ev?.target?.getLatLng?.() || { lat: d.lat, lng: d.lng }
+        modal.value = { lat: ll.lat, lng: ll.lng, title: '', comment: '', category: 'note' }
+        detail.value = null
+        dropMode.value = false
+        return
+      }
+      onGoDay(d)
+    })
     m.on('dragend', async (e) => {
       const ll = e.target.getLatLng()
       try {
@@ -1272,10 +1370,10 @@ function attachLegLabels(days) {
     if (leg.source === 'estimate') cls.push('is-est')
     if (isShort) cls.push('is-short')
     const html = isShort
-      ? `<div class="${cls.join(' ')}"><span class="leg-label-km">${leg.km} km</span></div>`
+      ? `<div class="${cls.join(' ')}"><span class="leg-label-km">${formatDistance(leg.km)}</span></div>`
       : `<div class="${cls.join(' ')}">` +
           `<span class="leg-label-dur">${fmtMinutesTight(leg.minutes)}</span>` +
-          `<span class="leg-label-km"> · ${leg.km} km</span>` +
+          `<span class="leg-label-km"> · ${formatDistance(leg.km)}</span>` +
           `</div>`
     const m = L.marker([midLat, midLng], {
       icon: L.divIcon({
@@ -1788,7 +1886,7 @@ const nextLegInfo = computed(() => {
   const k = legPairKey(here, there)
   const leg = drivingLegs.value[k]
   const name = there.label || dayPlaceNames.value[there.id] || 'next stop'
-  if (leg) return `${name} · ${leg.km} km · ${fmtMinutes(leg.minutes)}`
+  if (leg) return `${name} · ${formatDistance(leg.km)} · ${fmtMinutes(leg.minutes)}`
   return name
 })
 
@@ -2420,14 +2518,50 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClickTools, tru
 // `/m/{slug}` means the recipient can't accidentally edit the host's trip.
 // We share the display slug (name-slug + id) when the trip is titled so the
 // link is human-readable; the viewer route resolves either form.
-function copyShareUrl() {
+const copiedMsg = ref('Read-only link copied')
+async function copyShareUrl() {
   const display = mapData.value
     ? buildMapSlug({ title: mapData.value.title, slug: slug.value })
     : slug.value
   const url = `${window.location.origin}/v/${display}`
-  navigator.clipboard.writeText(url)
+  const title = mapData.value?.title || 'My voyage'
+
+  // Mobile: prefer the native share sheet — it's the user's preferred share
+  // surface (Messages / WhatsApp / AirDrop) and confirms the action visually
+  // through the OS itself. Falls through to clipboard on desktop or when the
+  // user dismisses the sheet (we still copy so the link is one paste away).
+  let sharedNatively = false
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' && isMobile.value) {
+    try {
+      await navigator.share({ title, text: title, url })
+      sharedNatively = true
+      copiedMsg.value = 'Shared'
+    } catch {
+      // User dismissed the sheet or it failed — fall through to clipboard so
+      // the link is at least in the user's paste buffer.
+    }
+  }
+  if (!sharedNatively) {
+    try {
+      await navigator.clipboard.writeText(url)
+      copiedMsg.value = 'Read-only link copied'
+    } catch {
+      // Clipboard blocked (insecure context, denied) — still surface the URL
+      // by selecting it in a hidden textarea fallback so a manual copy works.
+      const ta = document.createElement('textarea')
+      ta.value = url
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch { /* best-effort */ }
+      document.body.removeChild(ta)
+      copiedMsg.value = 'Link ready — paste to share'
+    }
+  }
   copied.value = true
-  setTimeout(() => (copied.value = false), 1800)
+  setTimeout(() => (copied.value = false), 2200)
 }
 
 const showOverview = ref(false)
@@ -2624,6 +2758,13 @@ onBeforeUnmount(() => {
     padding: 0.25rem 0.4rem;
     border-radius: 999px;
   }
+  /* Mobile collapse: hide the secondary actions (refresh, theme,
+     new-voyage). The ⋯ tools popover already hosts everything important;
+     the share button stays visible because it is the user's primary
+     reason to open the topbar. PLAN/MAP toggle + share + ⋯ = 3 visible. */
+  .map-topbar .hide-mobile,
+  .plan-pane .hide-mobile { display: none !important; }
+  .map-topbar .head-icon { width: 1.7rem; height: 1.7rem; }
 }
 
 .tools-popover {
@@ -2848,6 +2989,81 @@ onBeforeUnmount(() => {
 }
 .pins-cats { flex: 1 1 100%; min-width: 0; }
 .error.sm { font-size: 0.82rem; margin: 0; }
+
+/* Persistent Tools chip strip — reveals the survival finders + offline cache
+   without opening the ⋯ popover. Desktop: docks top-of-map under the banner,
+   left-aligned with the trip ribbon's content edge. Mobile: docks bottom-
+   center with safe-area padding, well clear of the FAB / locate-me column
+   on the right and Leaflet zoom controls (top-left of map) so it never
+   collides with native map controls. */
+.tools-strip {
+  position: absolute;
+  z-index: 750;
+  /* Desktop: sit just below the topleft trip-title pill (top 96 + ~40 + gap)
+     so the chip strip never collides with the title. The .with-ribbon class
+     pushes it further down past the trip ribbon. */
+  top: 144px;
+  left: 12px;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  padding: 0.35rem 0.45rem;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 var(--ink), 0 6px 14px rgba(0, 0, 0, 0.12);
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tools-strip::-webkit-scrollbar { display: none; }
+.tools-strip.with-ribbon {
+  /* When the ribbon is showing, drop further below the ribbon-anchored
+     today-banner row so the chip strip stays clear of both. */
+  top: 196px;
+}
+.tools-strip-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.65rem;
+  background: var(--cream);
+  border: 1px solid var(--cream-edge);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 90ms ease, color 90ms ease, border-color 90ms ease;
+}
+.tools-strip-chip:hover { border-color: var(--ink); }
+.tools-strip-chip.on {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.tools-strip-icon { font-size: 0.95rem; }
+@media (max-width: 720px) {
+  .tools-strip {
+    top: auto;
+    /* Bottom: above iOS home indicator + clear of nothing else (FAB is at
+       right: 16px / bottom: 80px, locate-me sits above the FAB; the strip
+       is centered so it doesn't occlude either column). */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.3rem 0.4rem;
+    /* Cap width so the chips remain horizontally scrollable on a narrow
+       viewport rather than pushing past the locate-me column on the right. */
+    max-width: calc(100vw - 24px);
+  }
+  .tools-strip.with-ribbon { top: auto; }
+  .tools-strip-chip { padding: 0.3rem 0.55rem; font-size: 0.65rem; }
+}
 
 /* Floating "show me" map control — aligns under the 56px FAB at right: 16px */
 .locate-me {
@@ -3216,33 +3432,58 @@ onBeforeUnmount(() => {
   transform: translate(-50%, 8px);
 }
 
-/* Share-copy toast — anchored under the top-right toolbar so it appears
-   right where the ↗ icon flipped to ✓. Same ink/cream palette as the
-   delete toast, scoped narrow so it can't bleed into other controls. */
+/* Share-copy toast — top-center so it overlays the map clear of every
+   floating control (topbar pill, ribbon, banner). Larger type + cream/ink
+   palette so it reads at arm's length on a phone. */
 .share-toast {
-  position: absolute;
-  top: calc(96px + 2.4rem + 0.4rem);
-  right: 12px;
-  z-index: 950;
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   background: var(--ink);
   color: var(--paper);
-  padding: 0.45rem 0.75rem;
-  border-radius: 4px;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  padding: 0.7rem 1.1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
   pointer-events: none;
   white-space: nowrap;
+  max-width: calc(100% - 2rem);
+}
+.share-toast-tick {
+  display: inline-grid;
+  place-items: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: var(--vermillion);
+  color: var(--paper);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.share-toast-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 @media (max-width: 720px) {
-  .share-toast { top: calc(64px + 2.2rem + 0.4rem); right: 8px; }
+  .share-toast {
+    top: 0.75rem;
+    font-size: 0.78rem;
+    padding: 0.6rem 0.95rem;
+  }
 }
 .share-toast.toast-enter-from,
 .share-toast.toast-leave-to {
-  /* Override the centred del-toast keyframes so this slides in from the
-     button (no horizontal nudge). */
-  transform: translateY(-6px);
+  /* Slide down from above — keeps the centered transform intact. */
+  opacity: 0;
+  transform: translate(-50%, -10px);
 }
 
 /* Cmd/Ctrl+Z confirmation — sits next to the share toast so the user gets

@@ -9,7 +9,12 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from services.cache import TTLMemoryCache
-from services.geocoding import primary_resolution
+from services.geocoding import (
+    merge_overrides,
+    primary_resolution,
+    rerank_search_results,
+)
+from services.nps_overrides import find_overrides
 from services.throttle import AsyncThrottler
 
 logger = logging.getLogger(__name__)
@@ -63,6 +68,18 @@ async def geocode(
         if bounded:
             params["bounded"] = "1"
     data = await _nominatim_get("/search", params, accept_language)
+
+    # Re-rank Nominatim's results so NPS-protected areas outrank the
+    # same-named villages / valleys / deserts that organic ``importance``
+    # scoring puts on top, then prepend curated overrides for the units
+    # Nominatim sometimes drops entirely (Death Valley NP being the
+    # canonical offender).
+    if isinstance(data, list):
+        data = rerank_search_results(data, q)
+        curated = find_overrides(q)
+        if curated:
+            data = merge_overrides(curated, data, limit=int(params["limit"]))
+
     _cache.set(cache_key, data)
     return data
 

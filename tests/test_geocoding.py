@@ -7,7 +7,13 @@ import asyncio
 import pytest
 
 from api import geocode as geocode_module
-from services.geocoding import extract_primary_secondary, primary_resolution
+from services.geocoding import (
+    extract_primary_secondary,
+    merge_overrides,
+    primary_resolution,
+    rerank_search_results,
+)
+from services.nps_overrides import find_overrides
 
 
 # ---------------------------------------------------------------------------
@@ -200,3 +206,233 @@ def test_reverse_logs_resolved_admin_region(monkeypatch, caplog):
     joined = " ".join(r.getMessage() for r in caplog.records)
     assert "37.27" in joined and "-112.95" in joined
     assert "Washington County" in joined
+
+
+# ---------------------------------------------------------------------------
+# Forward-search re-rank + curated NPS overrides — "Bryce Canyon" should
+# resolve to the National Park, not a Tropic-village or a Texas street.
+# ---------------------------------------------------------------------------
+
+
+def _bryce_organic_nominatim_payload() -> list[dict]:
+    """A sanitised copy of what live Nominatim returns for ``Bryce Canyon``
+    *before* re-ranking — the village/street/valley hits that prompted the
+    user's bug report. Used to exercise both the re-rank logic and the
+    curated-override merge in a single fixture."""
+    return [
+        {
+            "place_id": 1,
+            "lat": "37.6184",
+            "lon": "-112.1422",
+            "class": "natural",
+            "type": "valley",
+            "place_rank": 22,
+            "importance": 0.18,
+            "addresstype": "valley",
+            "name": "Bryce Canyon",
+            "display_name": "Bryce Canyon, Tropic, Garfield County, Utah, United States",
+            "address": {"valley": "Bryce Canyon", "village": "Tropic"},
+        },
+        {
+            "place_id": 2,
+            "lat": "29.6478",
+            "lon": "-98.4619",
+            "class": "highway",
+            "type": "residential",
+            "place_rank": 26,
+            "importance": 0.05,
+            "addresstype": "road",
+            "name": "Bryce Canyon",
+            "display_name": "Bryce Canyon, San Antonio, Bexar County, Texas, United States",
+            "address": {"road": "Bryce Canyon", "city": "San Antonio"},
+        },
+        {
+            "place_id": 3,
+            "lat": "39.0281",
+            "lon": "-76.9468",
+            "class": "highway",
+            "type": "residential",
+            "place_rank": 26,
+            "importance": 0.05,
+            "addresstype": "road",
+            "name": "Bryce Canyon",
+            "display_name": "Bryce Canyon, Calverton, Maryland, United States",
+            "address": {"road": "Bryce Canyon"},
+        },
+    ]
+
+
+def test_rerank_promotes_protected_area_over_village_valley():
+    """Pure unit test for the re-ranker. A protected_area entry hidden at
+    the bottom of Nominatim's response must surface to the top — without
+    needing the curated overrides table."""
+    organic = _bryce_organic_nominatim_payload() + [
+        {
+            "place_id": 99,
+            "lat": "37.59",
+            "lon": "-112.19",
+            "class": "boundary",
+            "type": "protected_area",
+            "addresstype": "nature_reserve",
+            "importance": 0.51,
+            "name": "Bryce Canyon National Park",
+            "display_name": "Bryce Canyon National Park, Garfield County, Utah",
+            "extratags": {
+                "boundary": "protected_area",
+                "operator": "National Park Service",
+                "protect_class": "2",
+            },
+        },
+    ]
+    reranked = rerank_search_results(organic, "Bryce Canyon")
+    assert reranked[0]["name"] == "Bryce Canyon National Park"
+    # Same-name natural feature must drop *below* the parks/streets, not vanish.
+    valley_index = next(
+        i for i, r in enumerate(reranked)
+        if r["class"] == "natural" and r["type"] == "valley"
+    )
+    park_index = next(
+        i for i, r in enumerate(reranked) if "National Park" in r["name"]
+    )
+    assert park_index < valley_index
+
+
+def test_find_overrides_matches_bryce_grand_canyon_death_valley():
+    for query, expected in [
+        ("Bryce Canyon", "Bryce Canyon National Park"),
+        ("bryce canyon", "Bryce Canyon National Park"),
+        ("Grand Canyon", "Grand Canyon National Park"),
+        ("Death Valley", "Death Valley National Park"),
+        ("zion", "Zion National Park"),
+    ]:
+        hits = find_overrides(query)
+        assert hits, f"expected curated hit for {query!r}"
+        assert hits[0]["name"] == expected
+        # Must look like a Nominatim /search hit so the existing frontend
+        # contract holds.
+        for key in ("lat", "lon", "name", "display_name", "address", "boundingbox"):
+            assert key in hits[0]
+
+
+def test_find_overrides_ignores_unrelated_query():
+    assert find_overrides("San Antonio") == []
+    assert find_overrides("") == []
+
+
+def test_merge_overrides_prepends_and_dedupes_by_name():
+    curated = find_overrides("Bryce Canyon")
+    organic = _bryce_organic_nominatim_payload() + [
+        {
+            "name": "Bryce Canyon National Park",  # duplicate of curated
+            "lat": "0",
+            "lon": "0",
+            "class": "leisure",
+            "type": "nature_reserve",
+            "importance": 0.5,
+        },
+    ]
+    merged = merge_overrides(curated, organic, limit=8)
+    # Curated entry must lead.
+    assert merged[0]["name"] == "Bryce Canyon National Park"
+    # Dedup: the duplicate organic National Park must be dropped.
+    park_count = sum(1 for r in merged if r["name"] == "Bryce Canyon National Park")
+    assert park_count == 1
+
+
+def test_geocode_endpoint_returns_bryce_canyon_national_park_first(monkeypatch):
+    """End-to-end behaviour: the bug the user filed. Typing ``Bryce Canyon``
+    must put the National Park first, not Tropic / a Texas street / the
+    Maryland street. Combines curated override + organic re-rank."""
+    async def fake_nominatim_get(path, params, accept_language):
+        assert path == "/search"
+        return _bryce_organic_nominatim_payload()
+
+    monkeypatch.setattr(geocode_module, "_nominatim_get", fake_nominatim_get)
+
+    out = _run(geocode_module.geocode(q="Bryce Canyon"))
+    assert isinstance(out, list)
+    assert out, "expected at least one result"
+    assert out[0]["name"] == "Bryce Canyon National Park"
+    # Top-2 must contain the park even if a future override list grows.
+    top2_names = {r.get("name") for r in out[:2]}
+    assert "Bryce Canyon National Park" in top2_names
+    # Original Nominatim hits must still be returned (not silently dropped).
+    assert any(
+        r.get("display_name", "").startswith("Bryce Canyon, Tropic") for r in out
+    )
+
+
+def test_geocode_endpoint_surfaces_grand_canyon_np_even_if_nominatim_omits_it(monkeypatch):
+    """Live Nominatim returns *only* the geographic valley node for
+    ``Grand Canyon``; the curated override is what guarantees the park
+    still shows up at all."""
+    async def fake_nominatim_get(path, params, accept_language):
+        return [
+            {
+                "place_id": 11,
+                "lat": "36.0980",
+                "lon": "-112.0963",
+                "class": "natural",
+                "type": "valley",
+                "place_rank": 22,
+                "importance": 0.58,
+                "addresstype": "valley",
+                "name": "Grand Canyon",
+                "display_name": "Grand Canyon, Coconino County, Arizona, United States",
+            },
+        ]
+
+    monkeypatch.setattr(geocode_module, "_nominatim_get", fake_nominatim_get)
+
+    out = _run(geocode_module.geocode(q="Grand Canyon"))
+    assert out[0]["name"] == "Grand Canyon National Park"
+
+
+def test_geocode_endpoint_surfaces_death_valley_np(monkeypatch):
+    async def fake_nominatim_get(path, params, accept_language):
+        return [
+            {
+                "place_id": 21,
+                "lat": "36.4229",
+                "lon": "-116.9137",
+                "class": "natural",
+                "type": "desert",
+                "place_rank": 22,
+                "importance": 0.57,
+                "addresstype": "desert",
+                "name": "Death Valley",
+                "display_name": "Death Valley, California, United States",
+            },
+        ]
+
+    monkeypatch.setattr(geocode_module, "_nominatim_get", fake_nominatim_get)
+
+    out = _run(geocode_module.geocode(q="Death Valley"))
+    assert out[0]["name"] == "Death Valley National Park"
+
+
+def test_geocode_endpoint_unrelated_query_passes_through_unchanged(monkeypatch):
+    """Non-NPS queries must not be polluted with curated overrides and
+    must preserve Nominatim's order when no protected-area boost applies."""
+    payload = [
+        {
+            "place_id": 30,
+            "name": "Page",
+            "display_name": "Page, Coconino County, Arizona, United States",
+            "class": "place",
+            "type": "city",
+            "addresstype": "city",
+            "importance": 0.5,
+            "lat": "36.91",
+            "lon": "-111.46",
+        },
+    ]
+
+    async def fake_nominatim_get(path, params, accept_language):
+        return list(payload)
+
+    monkeypatch.setattr(geocode_module, "_nominatim_get", fake_nominatim_get)
+
+    out = _run(geocode_module.geocode(q="Page"))
+    assert len(out) == 1
+    assert out[0]["name"] == "Page"

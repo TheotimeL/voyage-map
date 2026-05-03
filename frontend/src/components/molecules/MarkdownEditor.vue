@@ -66,7 +66,7 @@ const editor = useEditor({
   },
   onUpdate: ({ editor }) => {
     // Tiptap-markdown exposes `.storage.markdown.getMarkdown()` for serialize.
-    const md = editor.storage.markdown.getMarkdown()
+    const md = stripUnneededEscapes(editor.storage.markdown.getMarkdown())
     emit('update:modelValue', md)
   },
 })
@@ -74,9 +74,22 @@ const editor = useEditor({
 // Keep external model changes in sync without echoing our own emits.
 watch(() => props.modelValue, (next) => {
   if (!editor.value) return
-  const current = editor.value.storage.markdown.getMarkdown()
+  const current = stripUnneededEscapes(editor.value.storage.markdown.getMarkdown())
   if (next !== current) editor.value.commands.setContent(next || '', false)
 })
+
+// prosemirror-markdown's serializer escapes any of `*_[]~\`` to keep them
+// from re-parsing as markdown. `~` is harmless in our renderer (markdown-it
+// without GFM strikethrough), but the leaked backslash still shows up in
+// callers that print the raw string (PlanView pin cards, the banner excerpt
+// helper, Itinerary day notes), so strip the unneeded escape at the source.
+// Keep `\\` (literal backslash) intact by walking pairs.
+function stripUnneededEscapes(md) {
+  if (!md) return md
+  // Replace `\~` with `~` only when the backslash is not itself escaped.
+  // `(^|[^\\])` ensures we don't touch `\\~` (literal-backslash + tilde).
+  return md.replace(/(^|[^\\])\\~/g, '$1~')
+}
 
 onBeforeUnmount(() => editor.value?.destroy())
 

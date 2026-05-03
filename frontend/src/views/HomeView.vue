@@ -64,35 +64,62 @@
     </section>
 
     <section class="form">
-      <label class="eyebrow lbl">01 · Where to?</label>
+      <!-- 01 · Name. The trip name is free-text and primary — the user said
+           things like "Vegas → SF, May 2026"; deriving it from the origin was
+           the original bug. -->
+      <label class="eyebrow lbl" for="trip-title-field">01 · Name your trip</label>
+      <input
+        id="trip-title-field"
+        v-model="title"
+        class="field title-field"
+        placeholder="e.g. Vegas → SF road trip"
+        maxlength="120"
+      />
+
+      <!-- 02 · Origin. Picking does NOT overwrite the title anymore. Instead
+           the picked label sticks around in a chip next to the search field
+           so the user can see what they selected (the geocoder clears its own
+           input after pick). -->
+      <label class="eyebrow lbl">02 · Where does the trip start?</label>
       <GeocoderSearch
         placeholder="Las Vegas · Mt. Fuji · 11° N 80° W…"
         :bias="homeBias"
         @pick="onPick"
       />
-      <button class="locate-link" type="button" @click="useMyLocation" :disabled="locating">
-        ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
-      </button>
+      <div class="origin-row">
+        <button class="locate-link" type="button" @click="useMyLocation" :disabled="locating">
+          ⌖ {{ locating ? 'Locating…' : 'Use my location' }}
+        </button>
+        <span v-if="picked" class="origin-chip" :title="picked.label">
+          <span class="origin-chip-lbl mono">Starting from</span>
+          <span class="origin-chip-val">{{ pickedShort }}</span>
+          <button
+            class="origin-chip-clear"
+            type="button"
+            title="Clear origin"
+            @click="clearPicked"
+          >×</button>
+        </span>
+      </div>
       <p v-if="locateError" class="error sm">{{ locateError }}</p>
 
       <Transition name="reveal">
-        <div v-if="picked" class="preview-wrap">
-          <p class="eyebrow lbl">02 · Preview</p>
-          <div ref="mapEl" class="preview-map"></div>
-
-          <p class="eyebrow lbl">03 · Name it (optional) and go</p>
-          <div class="row">
-            <input
-              v-model="title"
-              class="field title-field"
-              placeholder="e.g. Vegas → SF road trip"
-              maxlength="120"
-            />
-            <button class="btn" :disabled="creating" @click="create">
+        <div v-if="picked" ref="readyEl" class="ready-wrap">
+          <!-- Action bar lives directly under the picker so "Begin journey"
+               is visible without scrolling on a 14" laptop. -->
+          <div class="action-row">
+            <label class="day1-toggle">
+              <input type="checkbox" v-model="addDay1Stop" />
+              <span>Add <strong>{{ pickedShort }}</strong> as a Day-1 stop ({{ todayLabel }})</span>
+            </label>
+            <button class="btn primary" :disabled="creating" @click="create">
               {{ creating ? 'Plotting…' : 'Begin journey →' }}
             </button>
           </div>
           <p v-if="error" class="error">{{ error }}</p>
+
+          <p class="eyebrow lbl">Preview</p>
+          <div ref="mapEl" class="preview-map"></div>
         </div>
       </Transition>
     </section>
@@ -136,6 +163,29 @@ const error = ref('')
 const locating = ref(false)
 const locateError = ref('')
 const recents = ref(recentMaps())
+// Default-on: most trips start on the day they're created. The user can
+// uncheck this if they're plotting a region map without a fixed Day 1.
+const addDay1Stop = ref(true)
+
+// First comma-segment is the human-friendly short name ("Las Vegas, Clark…"
+// → "Las Vegas"). Used both in the chip and as the auto Day-1 stop title.
+const pickedShort = computed(() => {
+  if (!picked.value?.label) return ''
+  return picked.value.label.split(',')[0].trim().slice(0, 120)
+})
+
+// Today, formatted as YYYY-MM-DD in local time (matches what the itinerary
+// schema expects — a `date`, not a `datetime`).
+function todayIso() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+const todayLabel = computed(() =>
+  new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+)
 
 // Bias the home search by the most recent voyage's centre — anchors the user
 // in their familiar territory between sessions.
@@ -180,6 +230,7 @@ async function copyLink(slug) {
 }
 
 const mapEl = ref(null)
+const readyEl = ref(null)
 let map = null
 let centerMarker = null
 
@@ -198,15 +249,27 @@ async function useMyLocation() {
 
 async function onPick(r) {
   picked.value = r
-  // Seed the title from the picked location's first segment, but only if the
-  // user hasn't typed anything yet (don't clobber their work).
-  if (!title.value.trim() && r.label) {
-    title.value = r.label.split(',')[0].trim().slice(0, 120)
-  }
+  // Note: we deliberately no longer seed the title from the picked location —
+  // origin and trip name are independent fields now.
   await nextTick()
   ensureMap()
   map.setView([r.lat, r.lng], 9)
   centerMarker.setLatLng([r.lat, r.lng])
+  // Scroll the action bar (with "Begin journey") into view so the user sees
+  // the next step without hunting below the map preview.
+  if (readyEl.value?.scrollIntoView) {
+    readyEl.value.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
+function clearPicked() {
+  picked.value = null
+  if (map) {
+    // Tear down so the preview block remounts cleanly next time.
+    map.remove()
+    map = null
+    centerMarker = null
+  }
 }
 
 function ensureMap() {
@@ -250,6 +313,33 @@ async function create() {
       radius_m: 50000,
     })
     rememberMap(m.slug, m.title)
+
+    // Auto Day-1 stop: create an itinerary day for today anchored at the
+    // origin, and a `camp` pin attached to it. Failures here shouldn't block
+    // the user from entering their map — log and continue.
+    if (addDay1Stop.value) {
+      try {
+        const today = todayIso()
+        const stopName = pickedShort.value || 'Day 1'
+        const day = await api.addItineraryDay(m.slug, {
+          date: today,
+          label: stopName,
+          lat: picked.value.lat,
+          lng: picked.value.lng,
+        })
+        await api.addPoint(m.slug, {
+          lat: picked.value.lat,
+          lng: picked.value.lng,
+          title: stopName,
+          category: 'camp',
+          itinerary_day_id: day?.id ?? null,
+        })
+      } catch (seedErr) {
+        // Non-fatal: the map exists, user can add the pin manually.
+        console.warn('Day-1 auto-stop failed:', seedErr)
+      }
+    }
+
     router.push({ name: 'map', params: { slug: buildMapSlug(m) } })
   } catch (e) {
     error.value = e.message || 'Could not chart your map.'
@@ -398,7 +488,7 @@ h1 { margin: 0.5rem 0 1rem; }
 /* Form ----------------------------------------------------------- */
 .form {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.6rem;
   border: 1.5px solid var(--ink);
   border-radius: 6px;
   background: var(--paper);
@@ -407,18 +497,95 @@ h1 { margin: 0.5rem 0 1rem; }
 }
 .lbl { color: var(--ink); font-weight: 700; }
 .eyebrow.lbl { margin: 0; }
+/* Tighter rhythm between section labels and the rest of the form rows. */
+.form .eyebrow.lbl { margin-top: 0.3rem; }
+.form .eyebrow.lbl:first-of-type { margin-top: 0; }
 
-.preview-wrap { display: grid; gap: 0.9rem; margin-top: 0.4rem; }
+.title-field { width: 100%; font-size: 1.05rem; }
+
+/* Origin chip ---------------------------------------------------- */
+.origin-row {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: -0.2rem;
+}
+.origin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.45rem 0.25rem 0.6rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--cream);
+  font-size: 0.85rem;
+  max-width: 100%;
+}
+.origin-chip-lbl {
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+.origin-chip-val {
+  font-family: var(--display);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22ch;
+}
+.origin-chip-clear {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.1rem;
+}
+.origin-chip-clear:hover { color: var(--vermillion); }
+
+/* Ready wrap (action bar + preview) ----------------------------- */
+.ready-wrap { display: grid; gap: 0.7rem; margin-top: 0.6rem; }
+.action-row {
+  display: flex;
+  gap: 0.9rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 0.6rem 0.7rem;
+  border: 1.5px dashed var(--ink);
+  border-radius: 4px;
+  background: var(--cream);
+}
+.day1-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.day1-toggle input { accent-color: var(--vermillion); }
+.day1-toggle strong { color: var(--ink); }
+.btn.primary {
+  /* Slightly emphasised so it reads as the next step. */
+  font-weight: 700;
+}
+/* Smaller preview thumb so the action bar + map fit above the fold on a
+   typical 14" laptop without scrolling. */
 .preview-map {
   width: 100%;
-  height: 280px;
+  height: 160px;
   border: 1.5px solid var(--ink);
   border-radius: 4px;
   background: var(--cream-deep);
 }
 
-.row { display: flex; gap: 0.7rem; align-items: stretch; flex-wrap: wrap; }
-.title-field { flex: 1; min-width: 220px; }
 .error { color: var(--vermillion-deep); font-weight: 500; margin: 0; }
 .error.sm { font-size: 0.85rem; }
 
@@ -432,8 +599,6 @@ h1 { margin: 0.5rem 0 1rem; }
   text-transform: uppercase;
   color: var(--vermillion);
   cursor: pointer;
-  justify-self: start;
-  margin-top: -0.4rem;
 }
 .locate-link:hover { color: var(--vermillion-deep); }
 .locate-link:disabled { color: var(--ink-faded); cursor: wait; }
@@ -454,5 +619,7 @@ h1 { margin: 0.5rem 0 1rem; }
 @media (max-width: 720px) {
   .hero { grid-template-columns: 1fr; }
   .hero-mark { justify-self: start; }
+  .action-row { flex-direction: column; align-items: stretch; }
+  .action-row .btn { width: 100%; }
 }
 </style>

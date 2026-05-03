@@ -29,13 +29,19 @@
       <div class="plan-stops-head">
         <h2 class="plan-h2">Stops</h2>
         <div class="plan-stops-actions">
-          <button class="btn btn-tiny" type="button" @click="addOpen = !addOpen">{{ addOpen ? '× Close' : '+ Add stop' }}</button>
+          <button
+            class="btn btn-tiny"
+            type="button"
+            :aria-expanded="addOpen"
+            aria-controls="plan-add-panel"
+            @click="addOpen = !addOpen"
+          >{{ addOpen ? '× Close' : '+ Add stop' }}</button>
           <button class="btn btn-tiny btn-ghost" type="button" @click="emit('open-paste')">Paste import…</button>
         </div>
       </div>
 
       <Transition name="reveal">
-        <section v-if="addOpen" class="add-row">
+        <section v-if="addOpen" id="plan-add-panel" class="add-row">
           <form class="add-form" @submit.prevent="addEmptyStop">
             <input
               v-model="addDate"
@@ -45,7 +51,11 @@
               :max="lastISO"
               required
             />
-            <button class="btn btn-tiny" type="submit">+ Empty stop</button>
+            <button
+              class="btn btn-tiny"
+              type="submit"
+              title="Add a stop without a date — fill in later"
+            >+ Unplaced stop</button>
           </form>
           <GeocoderSearch
             placeholder="Or search a place for that date…"
@@ -184,9 +194,9 @@
                   />
                   <p v-if="r.legNext" class="mobile-summary mono" aria-hidden="true">
                     <template v-if="r.legNext.real">
-                      ↓ {{ r.legNext.real.km.toLocaleString() }} km · {{ fmtMinutesTight(r.legNext.real.minutes) }}
+                      ↓ {{ formatDistance(r.legNext.real.km) }} · {{ fmtMinutesTight(r.legNext.real.minutes) }}
                     </template>
-                    <template v-else>↓ ≈ {{ r.legNext.km.toLocaleString() }} km</template>
+                    <template v-else>↓ ≈ {{ formatDistance(r.legNext.km) }}</template>
                   </p>
                   <div class="place-loc">
                     <em
@@ -213,7 +223,7 @@
                     <span v-if="spanWeather(r.day).length > 1" class="wx-tag">{{ wx.tag }}</span>
                     <template v-if="wx.forecast">
                       {{ glyphFor(wx.forecast.code) }}
-                      {{ wx.forecast.tMax }}° / {{ wx.forecast.tMin }}°<template v-if="wx.forecast.precip > 0.5"> · {{ wx.forecast.precip.toFixed(1) }}mm</template>
+                      {{ formatTempValue(wx.forecast.tMax) }}° / {{ formatTempValue(wx.forecast.tMin) }}°<template v-if="wx.forecast.precip > 0.5"> · {{ wx.forecast.precip.toFixed(1) }}mm</template>
                     </template>
                     <template v-else-if="wx.tooFarDays != null">· weather in {{ wx.tooFarDays }}d</template>
                   </p>
@@ -283,14 +293,14 @@
               <td class="c-leg mono">
                 <template v-if="r.legNext && r.legNext.real">
                   <div class="leg-cell" :class="{ 'is-short': r.legNext.real.km < 5, 'is-long': r.legNext.real.minutes >= 180 || r.legNext.real.km >= 250 }">
-                    <span class="leg-km">{{ r.legNext.real.km.toLocaleString() }} km</span>
+                    <span class="leg-km">{{ formatDistance(r.legNext.real.km) }}</span>
                     <span class="leg-time">{{ fmtMinutesTight(r.legNext.real.minutes) }}</span>
                     <span v-if="r.legNext.real.source === 'estimate'" class="leg-est">est</span>
                   </div>
                 </template>
                 <template v-else-if="r.legNext">
                   <div class="leg-cell">
-                    <span class="leg-km leg-faded">≈ {{ r.legNext.km.toLocaleString() }} km</span>
+                    <span class="leg-km leg-faded">≈ {{ formatDistance(r.legNext.km) }}</span>
                   </div>
                 </template>
                 <span v-else class="leg-faded">—</span>
@@ -369,7 +379,7 @@
           </div>
           <p v-if="p.comment" class="pin-card-comment">{{ p.comment }}</p>
           <p class="pin-card-meta mono">
-            <span v-if="trailStats(p)" class="pin-card-trail">{{ trailStats(p).km }} km<template v-if="trailStats(p).gain != null"> · D+ {{ trailStats(p).gain }} m</template></span>
+            <span v-if="trailStats(p)" class="pin-card-trail">{{ formatDistance(trailStats(p).km) }}<template v-if="trailStats(p).gain != null"> · D+ {{ trailStats(p).gain }} m</template></span>
             <span class="pin-card-coord">{{ formatLat(p.lat) }} · {{ formatLng(p.lng) }}</span>
           </p>
           <div v-if="p.itinerary_day_id != null" class="pin-card-actions">
@@ -396,6 +406,7 @@ import { CATEGORIES, formatLat, formatLng, parseGPX, todayISO, markdownExcerpt }
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { fmtMinutes, routeLeg } from '@/lib/routing.js'
 import { dailyForecast, glyphFor } from '@/lib/weather.js'
+import { formatDistance, formatTempValue } from '@/lib/settings.js'
 import { reverseGeocode } from '@/api.js'
 import GeocoderSearch from '../molecules/GeocoderSearch.vue'
 import CategoryFilters from '../molecules/CategoryFilters.vue'
@@ -876,14 +887,15 @@ const rows = computed(() => {
     weekStats.set(wn, ws)
   }
   const out = []
-  let cumulative = 0
   let lastWeekNum = 0
   for (let i = 0; i < sorted.length; i++) {
     const day = sorted[i]
     const next = i < sorted.length - 1 ? sorted[i + 1] : null
     const span = daysInSpan(day.date, endOf(day))
-    const startNum = cumulative + 1
-    const endNum = cumulative + span
+    // Trip-day index is the calendar offset from the trip's first stop date,
+    // so a stop on May 9 of a May-6-start trip reads "D4", not "D2".
+    const startNum = daysBetween(sorted[0].date, day.date) + 1
+    const endNum = startNum + span - 1
     const dayLabel = span > 1 ? `D${startNum}–${endNum}` : `D${startNum}`
     const spanLabel = span > 1 ? `+${span - 1}d` : ''
     const cleanLabel = day.label
@@ -907,7 +919,7 @@ const rows = computed(() => {
       if (ws) {
         const km = Math.round(ws.km)
         const stopsLbl = `${ws.stops} stop${ws.stops === 1 ? '' : 's'}`
-        weekSummary = km > 0 ? `${stopsLbl} · ${km.toLocaleString()} km` : stopsLbl
+        weekSummary = km > 0 ? `${stopsLbl} · ${formatDistance(km)}` : stopsLbl
       }
       lastWeekNum = weekNum
     }
@@ -928,7 +940,6 @@ const rows = computed(() => {
       isFuture: day.date > today.value,
       weekHeader, weekNum, weekRange, weekSummary,
     })
-    cumulative += span
   }
 
   // Inject ghost rows for unscheduled dates between the first stop and the
@@ -1060,7 +1071,7 @@ const metaLine = computed(() => {
     }
     parts.push(`${props.days.length} stop${props.days.length === 1 ? '' : 's'}`)
   }
-  if (totalDriveKm.value > 0) parts.push(`${totalDriveKm.value.toLocaleString()} km · ${fmtMinutes(totalDriveMin.value)}`)
+  if (totalDriveKm.value > 0) parts.push(`${formatDistance(totalDriveKm.value)} · ${fmtMinutes(totalDriveMin.value)}`)
   if ((props.points || []).length) parts.push(`${props.points.length} pin${props.points.length === 1 ? '' : 's'}`)
   return parts.join(' · ')
 })

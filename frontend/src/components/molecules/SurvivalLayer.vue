@@ -32,17 +32,40 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { fetchSurvival, SURVIVAL_KINDS } from '@/lib/overpass.js'
 
-const emit = defineEmits(['render', 'clear'])
-const props = defineProps({ getBounds: { type: Function, required: true } })
+const emit = defineEmits(['render', 'clear', 'update:selected', 'update:enabled'])
+const props = defineProps({
+  getBounds: { type: Function, required: true },
+  // Optional controlled state — when provided, the parent owns the selected
+  // kinds + on/off so a Tools chip strip elsewhere on the page (e.g. MapView's
+  // persistent toolbar) stays in sync with this panel. Both default to local
+  // refs so the panel still works standalone.
+  selected: { type: Set, default: null },
+  enabled: { type: Boolean, default: null },
+})
 
-const enabled = ref(false)
+const localSelected = ref(new Set(['water', 'dump', 'toilet', 'trash']))
+const localEnabled = ref(false)
 const loading = ref(false)
 const error = ref('')
 const count = ref(0)
-const selected = ref(new Set(['water', 'dump', 'toilet', 'trash']))
+
+const selected = computed({
+  get() { return props.selected ?? localSelected.value },
+  set(v) {
+    if (props.selected != null) emit('update:selected', v)
+    else localSelected.value = v
+  },
+})
+const enabled = computed({
+  get() { return props.enabled ?? localEnabled.value },
+  set(v) {
+    if (props.enabled != null) emit('update:enabled', v)
+    else localEnabled.value = v
+  },
+})
 
 function toggleKind(k) {
   const next = new Set(selected.value)
@@ -75,6 +98,12 @@ async function refresh() {
     emit('clear')
   } finally { loading.value = false }
 }
+
+// Refresh when an outside owner toggles the selected kinds (chip strip clicks)
+// while the layer is enabled.
+watch(() => (props.selected ? [...props.selected].sort().join(',') : ''), () => {
+  if (enabled.value) refresh()
+})
 </script>
 
 <style scoped>

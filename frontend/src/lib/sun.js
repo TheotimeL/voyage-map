@@ -1,5 +1,5 @@
 import SunCalc from 'suncalc'
-import tzLookup from 'tz-lookup'
+import { formatTime as formatTimeSetting, zoneFor as zoneForSetting } from './settings.js'
 
 export function sunInfo(lat, lng, when = new Date()) {
   const t = SunCalc.getTimes(when, lat, lng)
@@ -15,20 +15,13 @@ export function sunInfo(lat, lng, when = new Date()) {
 }
 
 // IANA timezone for a coordinate. Falls back to the browser's zone if the
-// lookup fails (out-of-range coords, etc.) — safer than crashing.
-export function zoneFor(lat, lng) {
-  try { return tzLookup(lat, lng) }
-  catch { return Intl.DateTimeFormat().resolvedOptions().timeZone }
-}
+// lookup fails. Re-exported from settings.js so existing callers keep working.
+export const zoneFor = zoneForSetting
 
-// Format an absolute Date as HH:MM. When `lat`+`lng` are provided, the time
-// is shown in local civil time at that location (DST-aware via IANA tz). With
-// no coords, falls back to the browser's local timezone.
+// Delegates to the locale-aware formatter in lib/settings.js — one source of
+// truth so the user's 12h/24h preference applies everywhere.
 export function formatTime(d, lat, lng) {
-  if (!(d instanceof Date) || Number.isNaN(d.valueOf())) return '—'
-  const opts = { hour: '2-digit', minute: '2-digit', hour12: false }
-  if (lat != null && lng != null) opts.timeZone = zoneFor(lat, lng)
-  return new Intl.DateTimeFormat('en-GB', opts).format(d)
+  return formatTimeSetting(d, lat, lng)
 }
 
 export function formatCountdown(ms) {
