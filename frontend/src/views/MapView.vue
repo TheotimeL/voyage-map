@@ -17,7 +17,7 @@
       @add-day="onAddDay"
       @delete-day="onDeleteDay"
       @patch-day="({ day, payload }) => onPatchDay(day, payload)"
-      @edit-day="(d) => editingDay = d"
+      @edit-day="onEditDay"
       @add-pin="onAddPinToDay"
       @attach-pin="onAttachPoint"
       @detach-pin="onDetachPoint"
@@ -79,7 +79,7 @@
 
       <MapFab
         :armed="dropMode"
-        :hidden="!!detail"
+        :hidden="!!detail || !!panelTarget"
         @drop="onFabDrop"
         @search="onFabSearch"
         @add-stop="onFabAddStop"
@@ -96,10 +96,9 @@
       </Transition>
 
       <PointDetailCard
-        v-if="detail && !modal"
+        v-if="detail && !panelTarget"
         :point="detail"
-        @edit="onEdit"
-        @delete="onDeleteDetail"
+        @open-panel="onCardOpenPanel"
         @close="closeDetail"
       />
 
@@ -140,7 +139,7 @@
         :dismissed="bannerDismissed"
         :get-bounds="getMapBounds"
         @go-day="onGoDay"
-        @edit-day="(d) => editingDay = d"
+        @edit-day="onEditDay"
         @advance="advanceToNextStop"
         @dismiss="dismissBanner"
         @render-survival="renderSurvival"
@@ -193,22 +192,14 @@
       @import="onPasteImportTopLevel"
     />
 
-    <PointFormModal
-      v-if="modal"
-      :model-value="modal"
-      :is-new="modal.id == null"
-      @save="onSave"
-      @close="modal = null"
-    />
-
-    <ItineraryDayModal
-      v-if="editingDay"
-      :model-value="editingDay"
+    <DetailPanel
+      ref="panelRef"
+      :target="panelTarget"
       :bias="searchBias"
       :existing-pins="pinCandidates"
-      @save="(payload) => onPatchDay(editingDay, payload)"
-      @locate-candidates="(c) => candidatesFor = c"
-      @close="editingDay = null"
+      @save="onPanelSave"
+      @delete="onPanelDelete"
+      @close="closePanel"
     />
 
     <Teleport to="body">
@@ -256,8 +247,7 @@ import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, 
 import { geocode, categoryFromOSM, reverseGeocode } from '@/api.js'
 import Itinerary from '@/components/organisms/Itinerary.vue'
 import PointList from '@/components/molecules/PointList.vue'
-import PointFormModal from '@/components/organisms/PointFormModal.vue'
-import ItineraryDayModal from '@/components/organisms/ItineraryDayModal.vue'
+import DetailPanel from '@/components/organisms/DetailPanel.vue'
 import PointDetailCard from '@/components/organisms/PointDetailCard.vue'
 import GeocoderSearch from '@/components/molecules/GeocoderSearch.vue'
 import CategoryFilters from '@/components/molecules/CategoryFilters.vue'
@@ -328,9 +318,12 @@ onBeforeUnmount(() => mqMobile.removeEventListener('change', onMqChange))
 const showPaste = ref(false)
 
 const activeId = ref(null)
-const modal = ref(null)
+// Unified detail panel target (M5): { kind: 'pin' | 'stop', value: { ... } }.
+// Replaces the old `modal` (PointFormModal) and `editingDay` (ItineraryDayModal)
+// state holders — every pin/stop edit and create routes through this ref.
+const panelTarget = ref(null)
+const panelRef = ref(null)
 const detail = ref(null)
-const editingDay = ref(null)
 const dropMode = ref(false)
 watch(dropMode, (on) => {
   document.body.classList.toggle('drop-mode', on)
@@ -919,7 +912,7 @@ function initLeaflet() {
   leaflet.on('click', (e) => {
     if (dropMode.value) {
       // Place a new pin at the clicked location and exit drop mode.
-      modal.value = { lat: e.latlng.lat, lng: e.latlng.lng, title: '', comment: '', category: 'note' }
+      openPanel({ kind: 'pin', value: { lat: e.latlng.lat, lng: e.latlng.lng, title: '', comment: '', category: 'note' } })
       detail.value = null
       dropMode.value = false
       return
@@ -1015,7 +1008,7 @@ function renderItinerary() {
       // drop-mode toggle off) runs in one place.
       if (dropMode.value) {
         const ll = ev?.target?.getLatLng?.() || { lat: d.lat, lng: d.lng }
-        modal.value = { lat: ll.lat, lng: ll.lng, title: '', comment: '', category: 'note' }
+        openPanel({ kind: 'pin', value: { lat: ll.lat, lng: ll.lng, title: '', comment: '', category: 'note' } })
         detail.value = null
         dropMode.value = false
         return
@@ -1315,7 +1308,6 @@ function openDetail(p) {
   const fresh = mapData.value.points.find((x) => x.id === p.id) || p
   detail.value = { ...fresh }
   activeId.value = fresh.id
-  modal.value = null
   if (leaflet) {
     leaflet.flyTo([fresh.lat, fresh.lng], Math.max(leaflet.getZoom(), 13), { duration: 0.4 })
   }
@@ -1326,30 +1318,134 @@ function closeDetail() {
   activeId.value = null
 }
 
-function onEdit() {
+// Unified DetailPanel open/close/save/delete (M5). All pin and stop edits
+// (and creates, after the user types into a fresh new-pin form) flow through
+// here. The panel itself debounces edits and emits 'save' after 800 ms idle —
+// onPanelSave dispatches by kind and threads the new id back via assignId on
+// the create→edit transition so the panel keeps editing the same record.
+function openPanel(target) {
+  if (!target) { panelTarget.value = null; return }
+  // Flush in-flight edits on the previous panel before pivoting — protects
+  // against typing being lost when the user clicks a second pin while the
+  // first save is still debouncing.
+  if (panelTarget.value && panelRef.value?.flush) panelRef.value.flush()
+  panelTarget.value = target
+}
+
+function closePanel() {
+  panelRef.value?.flush?.()
+  panelTarget.value = null
+}
+
+function onCardOpenPanel() {
   if (!detail.value) return
-  modal.value = { ...detail.value }
+  openPanel({ kind: 'pin', value: { ...detail.value } })
   detail.value = null
 }
 
-async function onDeleteDetail() {
-  if (!detail.value?.id) return
-  // Soft-delete: hide locally now, fire the server DELETE in 5s unless the
-  // user clicks Undo. Avoids a confirm() dialog (bad UX for one-tap pin work)
-  // while still being recoverable.
-  const point = detail.value
-  detail.value = null
-  activeId.value = null
-  scheduleSoftDelete({
-    kind: 'point',
-    message: `Pin "${point.title || 'untitled'}" deleted`,
-    hide: () => removePointMarker(point.id),
-    restore: () => addPointMarker(point),
-    commit: () => api.deletePoint(slug.value, point.id),
-    onCommit: () => {
-      mapData.value.points = mapData.value.points.filter((p) => p.id !== point.id)
-    },
-  })
+function onEditDay(d) { openPanel({ kind: 'stop', value: { ...d } }) }
+
+async function onPanelSave({ kind, id, payload }) {
+  if (kind === 'pin') {
+    if (id) {
+      let updated
+      try {
+        const before = mapData.value.points.find((p) => p.id === id)
+        const prev = before ? { ...before } : null
+        updated = await api.patchPoint(slug.value, id, payload)
+        const idx = mapData.value.points.findIndex((p) => p.id === id)
+        if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
+        if (prev) {
+          pushUndo(`edit "${updated.title || 'untitled'}"`, async () => {
+            const restored = await api.patchPoint(slug.value, id, {
+              title: prev.title,
+              comment: prev.comment,
+              category: prev.category,
+              priority: prev.priority ?? null,
+            })
+            const i = mapData.value.points.findIndex((p) => p.id === id)
+            if (i >= 0) mapData.value.points.splice(i, 1, restored)
+            try { removePointMarker(restored.id); addPointMarker(restored) } catch { /* leaflet refresh is decorative */ }
+          })
+        }
+      } catch (e) {
+        error.value = e.message
+        panelRef.value?.markError?.()
+        return
+      }
+      // Marker refresh is best-effort — a leaflet hiccup (e.g. cluster group
+      // mid-rebuild) shouldn't roll back the panel's saved indicator when
+      // the api call itself succeeded.
+      try {
+        if (updated) { removePointMarker(updated.id); addPointMarker(updated) }
+      } catch { /* swallow */ }
+      panelRef.value?.markSaved?.()
+    } else {
+      // First save on a new pin — create, then thread the id back into the
+      // panel so subsequent debounced saves patch the same record.
+      const seed = panelTarget.value?.value || {}
+      try {
+        const created = await api.addPoint(slug.value, {
+          ...payload,
+          lat: seed.lat,
+          lng: seed.lng,
+        })
+        mapData.value.points.push(created)
+        addPointMarker(created)
+        activeId.value = created.id
+        panelRef.value?.assignId?.(created.id)
+        panelRef.value?.markSaved?.()
+        pushUndo(`add "${created.title || 'pin'}"`, async () => {
+          await api.deletePoint(slug.value, created.id)
+          mapData.value.points = mapData.value.points.filter((p) => p.id !== created.id)
+          removePointMarker(created.id)
+          if (panelTarget.value?.value?.id === created.id) panelTarget.value = null
+        })
+      } catch (e) {
+        error.value = e.message
+        panelRef.value?.markError?.()
+      }
+    }
+    return
+  }
+  if (kind === 'stop' && id) {
+    const day = (mapData.value.itinerary || []).find((d) => d.id === id)
+    if (!day) return
+    try {
+      await onPatchDay(day, payload)
+      panelRef.value?.markSaved?.()
+    } catch (e) {
+      error.value = e?.message || 'Could not save.'
+      panelRef.value?.markError?.()
+    }
+  }
+}
+
+function onPanelDelete({ kind, id }) {
+  if (kind === 'pin') {
+    const point = mapData.value.points.find((p) => p.id === id)
+    if (!point) return
+    panelTarget.value = null
+    detail.value = null
+    activeId.value = null
+    scheduleSoftDelete({
+      kind: 'point',
+      message: `Pin "${point.title || 'untitled'}" deleted`,
+      hide: () => removePointMarker(point.id),
+      restore: () => addPointMarker(point),
+      commit: () => api.deletePoint(slug.value, point.id),
+      onCommit: () => {
+        mapData.value.points = mapData.value.points.filter((p) => p.id !== point.id)
+      },
+    })
+    return
+  }
+  if (kind === 'stop') {
+    const day = (mapData.value.itinerary || []).find((d) => d.id === id)
+    if (!day) return
+    panelTarget.value = null
+    onDeleteDay(day)
+  }
 }
 
 // Shared soft-delete state — only one delete can be pending at a time. If a
@@ -2018,7 +2114,6 @@ async function onPatchDay(day, payload) {
       mapData.value.itinerary[idx] = { ...mapData.value.itinerary[idx], ...updated }
       mapData.value.itinerary = [...mapData.value.itinerary].sort((a, b) => a.date.localeCompare(b.date))
     }
-    editingDay.value = null
     if (prevSnapshot) {
       pushUndo(`edit "${prevSnapshot.label || prevSnapshot.date}"`, async () => {
         const revertPayload = {
@@ -2137,13 +2232,13 @@ async function markMyLocation() {
     if (leaflet) leaflet.flyTo([loc.lat, loc.lng], 15, { duration: 0.6 })
     detail.value = null
     activeId.value = null
-    modal.value = {
+    openPanel({ kind: 'pin', value: {
       lat: loc.lat,
       lng: loc.lng,
       title: 'You are here',
       comment: '',
       category: 'note',
-    }
+    } })
   } catch (e) {
     locateError.value = e.message
   } finally {
@@ -2152,68 +2247,18 @@ async function markMyLocation() {
 }
 
 function onSearchPick(r) {
-  // Picking a search result opens the new-point modal at that location, pre-titled.
+  // Picking a search result opens DetailPanel at that location, pre-titled.
   const name = r.kind === 'local' ? r.label : r.label.split(',')[0]
   if (leaflet) leaflet.flyTo([r.lat, r.lng], 14, { duration: 0.5 })
   detail.value = null
   activeId.value = null
-  modal.value = {
+  openPanel({ kind: 'pin', value: {
     lat: r.lat,
     lng: r.lng,
     title: name,
     comment: '',
     category: categoryFromOSM(r.osmClass, r.osmType) || 'note',
-  }
-}
-
-async function onSave(payload) {
-  if (!modal.value) return
-  try {
-    if (modal.value.id) {
-      const before = mapData.value.points.find((p) => p.id === modal.value.id)
-      const prevSnapshot = before ? { ...before } : null
-      const updated = await api.patchPoint(slug.value, modal.value.id, payload)
-      const idx = mapData.value.points.findIndex((p) => p.id === updated.id)
-      if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
-      removePointMarker(updated.id)
-      addPointMarker(updated)
-      detail.value = { ...updated }
-      activeId.value = updated.id
-      if (prevSnapshot) {
-        pushUndo(`edit "${updated.title || 'untitled'}"`, async () => {
-          const restored = await api.patchPoint(slug.value, updated.id, {
-            title: prevSnapshot.title,
-            comment: prevSnapshot.comment,
-            category: prevSnapshot.category,
-            priority: prevSnapshot.priority ?? null,
-          })
-          const i = mapData.value.points.findIndex((p) => p.id === restored.id)
-          if (i >= 0) mapData.value.points.splice(i, 1, restored)
-          removePointMarker(restored.id)
-          addPointMarker(restored)
-        })
-      }
-    } else {
-      const created = await api.addPoint(slug.value, {
-        ...payload,
-        lat: modal.value.lat,
-        lng: modal.value.lng,
-      })
-      mapData.value.points.push(created)
-      addPointMarker(created)
-      activeId.value = created.id
-      detail.value = { ...created }
-      pushUndo(`add "${created.title || 'pin'}"`, async () => {
-        await api.deletePoint(slug.value, created.id)
-        mapData.value.points = mapData.value.points.filter((p) => p.id !== created.id)
-        removePointMarker(created.id)
-        if (detail.value?.id === created.id) { detail.value = null; activeId.value = null }
-      })
-    }
-    modal.value = null
-  } catch (e) {
-    error.value = e.message
-  }
+  } })
 }
 
 async function commitTitle() {
@@ -2257,10 +2302,10 @@ async function onAddPinToDay({ dayId, lat, lng, title, category }) {
 }
 
 // PlanView emits @edit-pin (clicking a pin chip or wishlist card) — open the
-// shared PointFormModal in edit mode. The existing onSave path handles the
-// patch + marker refresh.
+// unified DetailPanel in edit mode. onPanelSave handles the patch +
+// marker refresh.
 function onEditPin(p) {
-  modal.value = { ...p }
+  openPanel({ kind: 'pin', value: { ...p } })
 }
 
 // PlanView wishlist drag → ghost (empty date): create a stop on that date
