@@ -22,6 +22,17 @@
       <span class="mode-glyph" aria-hidden="true">◵</span>
       <span class="mode-label">Map</span>
     </button>
+    <button
+      type="button"
+      class="mode-btn"
+      :class="{ on: mode === 'journal' }"
+      :aria-pressed="mode === 'journal'"
+      title="Journal mode — notebook of stops and pins for long-form notes"
+      @click="$emit('change', 'journal')"
+    >
+      <span class="mode-glyph" aria-hidden="true">❧</span>
+      <span class="mode-label">Journal</span>
+    </button>
   </div>
 </template>
 

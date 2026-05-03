@@ -203,7 +203,7 @@
                   @click.stop="insertAbove(r)"
                 >+</button>
                 <span
-                  v-if="!r.isContinuation"
+                  v-if="r.isLastDayOfSpan"
                   class="row-insert below"
                   :title="`Add the next day — choose new stop or extend ${r.cleanLabel || r.day.label || 'this stop'}`"
                 >
@@ -225,16 +225,18 @@
               </td>
               <td class="c-location">
                 <button
+                  v-if="!r.isContinuation"
                   type="button"
                   class="cell-location"
                   :class="{ on: locationPopoverFor === r.day.id, missing: r.day.lat == null }"
                   :title="r.day.lat == null ? 'Set the location' : (placeNameFor(r.day) || 'Change the location')"
-                  @click.stop="toggleLocationPopover(r.day.id)"
+                  @click.stop="onLocationCellClick(r.day)"
                 >{{ r.day.lat != null ? (placeNameFor(r.day) || `${formatLat(r.day.lat)} · ${formatLng(r.day.lng)}`) : '—' }}</button>
-                <div v-if="locationPopoverFor === r.day.id" class="popover-anchor">
+                <div v-if="!r.isContinuation && locationPopoverFor === r.day.id" class="popover-anchor">
                   <div class="loc-popover paper" @click.stop>
                     <p class="dap-eyebrow mono">Set the location</p>
                     <GeocoderSearch
+                      ref="locGeo"
                       placeholder="Search a town, viewpoint, campground…"
                       :bias="bias"
                       @pick="onLocationPick(r.day, $event)"
@@ -598,11 +600,41 @@ watch(() => props.days, (next) => refreshPlaceNames(next || []), { immediate: tr
 
 // Inline "Set location" popover state — separate from the pin popover.
 const locationPopoverFor = ref(null)
-function toggleLocationPopover(id) {
-  locationPopoverFor.value = locationPopoverFor.value === id ? null : id
+async function openLocationPopover(id) {
+  locationPopoverFor.value = id
   // Mutually exclusive with the pin popover so the row doesn't render two
   // overlapping panels.
-  if (locationPopoverFor.value != null) popoverFor.value = null
+  popoverFor.value = null
+  await nextTick()
+  // Drop focus straight into the search input — the user just clicked Set
+  // location, so the next keystroke should start the search.
+  document.querySelector('.loc-popover input.field')?.focus()
+}
+function toggleLocationPopover(id) {
+  if (locationPopoverFor.value === id) { locationPopoverFor.value = null; return }
+  openLocationPopover(id)
+}
+// Click handler for the row's location cell. If the stop already has a label
+// but no coords yet, try the auto-pick first (top forward-geocode result) and
+// only open the popover if we couldn't resolve anything — saves the user a
+// second round of typing the same name. Lat already set or no label → open
+// the popover for manual edit / search.
+async function onLocationCellClick(day) {
+  if (locationPopoverFor.value === day.id) { locationPopoverFor.value = null; return }
+  const label = (day.label || '').trim()
+  if (label && day.lat == null) {
+    try {
+      const results = await forwardGeocode(label, props.bias)
+      const top = results && results[0]
+      if (top) {
+        emit('patch-day', { day, payload: { lat: top.lat, lng: top.lng } })
+        if (top.label) placeNames.value = { ...placeNames.value, [day.id]: top.label }
+        locationPopoverFor.value = null
+        return
+      }
+    } catch (_) { /* fall through to manual popover */ }
+  }
+  openLocationPopover(day.id)
 }
 function onLocationPick(day, result) {
   emit('patch-day', { day, payload: { lat: result.lat, lng: result.lng } })
@@ -2093,7 +2125,10 @@ button.row-insert:hover,
   padding: 0;
 }
 .leg-cell { font-size: 0.7rem; }
-.row-insert { width: 1.05rem; height: 1.05rem; font-size: 0.72rem; }
+/* Size override applies only to single buttons; the .below wrapper holds two
+   children and must keep its auto width or the buttons get squashed. */
+button.row-insert,
+.row-insert-btn { width: 1.05rem; height: 1.05rem; font-size: 0.72rem; }
 
 @media (max-width: 720px) {
   .plan { padding: 1rem 0.9rem 4rem; gap: 1.4rem; }

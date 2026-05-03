@@ -121,7 +121,10 @@ function onBlur() {
 </script>
 
 <style scoped>
-.geo { position: relative; }
+/* min-width: 0 lets the geocoder shrink below the input's intrinsic min-content
+   when nested in a grid/flex parent — without it the long placeholder text
+   widens the input past the popover container. */
+.geo { position: relative; min-width: 0; }
 .results {
   position: absolute;
   top: calc(100% + 4px);

@@ -36,6 +36,28 @@
       </template>
     </PlanView>
 
+    <!-- Journal mode: Notion-like tree of stops + their pins, plus a wishlist
+         of unattached pins. Clicking any node opens the unified DetailPanel
+         in edit mode (same target shape as plan/map). -->
+    <JournalView
+      v-if="mapData"
+      v-show="mode === 'journal'"
+      ref="journalRef"
+      class="journal-pane"
+      :slug="slug"
+      :title="mapData.title"
+      :days="mapData.itinerary || []"
+      :points="mapData.points || []"
+      @save="onJournalSave"
+    >
+      <template #mode-toggle>
+        <ModeToggleControl :mode="mode" @change="setMode" />
+      </template>
+      <template #head-tools>
+        <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
+      </template>
+    </JournalView>
+
     <!-- Map shell: dockless. The InfoPanel/MobileSheet was the old "Trip /
          Pins / Tools" drawer; it now lives as PlanView (table) + the Tools
          popover triggered from the topbar. The map fills the screen. -->
@@ -257,6 +279,7 @@ import MapFab from '@/components/molecules/MapFab.vue'
 import TripRibbon from '@/components/molecules/TripRibbon.vue'
 import MapBottomStrip from '@/components/molecules/MapBottomStrip.vue'
 import PlanView from '@/components/organisms/PlanView.vue'
+import JournalView from '@/components/organisms/JournalView.vue'
 import PasteImportModal from '@/components/organisms/PasteImportModal.vue'
 import ModeToggleControl from '@/components/atoms/ModeToggleControl.vue'
 import { RouterLink, useRouter } from 'vue-router'
@@ -298,11 +321,13 @@ const dockCollapsed = ref(false)
 // trip in active travel wants Map by default; a trip being prepared wants Plan.
 const modeStorageKey = computed(() => `voyage-mode:${slug.value}`)
 const mode = ref('plan')
+const VALID_MODES = new Set(['plan', 'map', 'journal'])
 onMounted(() => {
   const saved = localStorage.getItem(modeStorageKey.value)
-  if (saved === 'plan' || saved === 'map') mode.value = saved
+  if (VALID_MODES.has(saved)) mode.value = saved
 })
 function setMode(next) {
+  if (!VALID_MODES.has(next)) return
   mode.value = next
   try { localStorage.setItem(modeStorageKey.value, next) } catch { /* private mode */ }
 }
@@ -323,6 +348,7 @@ const activeId = ref(null)
 // state holders — every pin/stop edit and create routes through this ref.
 const panelTarget = ref(null)
 const panelRef = ref(null)
+const journalRef = ref(null)
 const detail = ref(null)
 const dropMode = ref(false)
 watch(dropMode, (on) => {
@@ -1421,6 +1447,56 @@ async function onPanelSave({ kind, id, payload }) {
   }
 }
 
+// Inline saves coming from JournalView (Notion-style — no panel mounted).
+// Reuses the same patch endpoints as onPanelSave but flags status on the
+// JournalNode that emitted the save instead of on the DetailPanel.
+async function onJournalSave({ kind, id, payload }) {
+  if (!id) return
+  if (kind === 'pin') {
+    let updated
+    try {
+      const before = mapData.value.points.find((p) => p.id === id)
+      const prev = before ? { ...before } : null
+      updated = await api.patchPoint(slug.value, id, payload)
+      const idx = mapData.value.points.findIndex((p) => p.id === id)
+      if (idx >= 0) mapData.value.points.splice(idx, 1, updated)
+      if (prev) {
+        pushUndo(`edit "${updated.title || 'untitled'}"`, async () => {
+          const restored = await api.patchPoint(slug.value, id, {
+            title: prev.title,
+            comment: prev.comment,
+            category: prev.category,
+            priority: prev.priority ?? null,
+          })
+          const i = mapData.value.points.findIndex((p) => p.id === id)
+          if (i >= 0) mapData.value.points.splice(i, 1, restored)
+          try { removePointMarker(restored.id); addPointMarker(restored) } catch { /* decorative */ }
+        })
+      }
+    } catch (e) {
+      error.value = e.message
+      journalRef.value?.markError?.(kind, id)
+      return
+    }
+    try {
+      if (updated) { removePointMarker(updated.id); addPointMarker(updated) }
+    } catch { /* swallow */ }
+    journalRef.value?.markSaved?.(kind, id)
+    return
+  }
+  if (kind === 'stop') {
+    const day = (mapData.value.itinerary || []).find((d) => d.id === id)
+    if (!day) return
+    try {
+      await onPatchDay(day, payload)
+      journalRef.value?.markSaved?.(kind, id)
+    } catch (e) {
+      error.value = e?.message || 'Could not save.'
+      journalRef.value?.markError?.(kind, id)
+    }
+  }
+}
+
 function onPanelDelete({ kind, id }) {
   if (kind === 'pin') {
     const point = mapData.value.points.find((p) => p.id === id)
@@ -2372,7 +2448,11 @@ function onPasteImportTopLevel(payload) {
 // and the rest stays grey. On the very first switch, we also re-fit to content
 // because the initial bounds were computed against a hidden container.
 const _mapInteracted = ref(false)
-watch(mode, async (next) => {
+watch(mode, async (next, prev) => {
+  // Leaving journal mode: flush any pending inline edits so a debounced save
+  // isn't dropped when the editor unmounts (v-show keeps it mounted, but a
+  // future v-if refactor would lose work — flush is cheap insurance).
+  if (prev === 'journal') journalRef.value?.flushAll?.()
   if (next === 'map' && leaflet) {
     await nextTick()
     leaflet.invalidateSize()
