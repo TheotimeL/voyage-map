@@ -53,54 +53,6 @@
         :selected-day-id="selectedRibbonDayId"
         @go="onGoDay"
       />
-      <div
-        v-if="todayBanner && !bannerDismissed"
-        class="today-banner"
-        :class="{ 'is-live': todayBanner.live, 'is-future': !todayBanner.live, 'with-ribbon': hasRibbon }"
-      >
-        <button class="banner-main" type="button" :title="`Center on ${todayBanner.day.label || 'this day'}`" @click="onGoDay(todayBanner.day)">
-          <div class="banner-row banner-row-primary">
-            <span class="banner-tag mono">{{ todayBanner.tag }}</span>
-            <span class="banner-text">{{ todayBanner.text }}</span>
-          </div>
-          <div
-            v-if="bannerSpanWx.length || todayBanner.sun || todayBanner.notes || (todayBanner.live && nextLegInfo)"
-            class="banner-row banner-row-meta mono"
-          >
-            <span
-              v-for="wx in bannerSpanWx"
-              :key="wx.date"
-              class="banner-wx"
-              :class="{ 'is-active': wx.isActive, 'is-faded': !wx.forecast }"
-              :title="`Forecast for ${wx.date}`"
-            >
-              <template v-if="bannerSpanWx.length > 1"><span class="banner-wx-tag">{{ wx.tag }}</span></template>
-              <template v-if="wx.forecast">
-                {{ wxGlyph(wx.forecast.code) }} {{ formatTempValue(wx.forecast.tMax) }}° / {{ formatTempValue(wx.forecast.tMin) }}°
-              </template>
-              <template v-else>—</template>
-            </span>
-            <span v-if="todayBanner.sun" class="banner-sun">
-              ☀ {{ todayBanner.sun.rise }} → {{ todayBanner.sun.set }}
-              <template v-if="todayBanner.live && sunsetCountdown"> · sunset {{ sunsetCountdown }}</template>
-            </span>
-            <span v-if="todayBanner.live && nextLegInfo" class="banner-next">↳ next: {{ nextLegInfo }}</span>
-            <span v-if="todayBanner.notes" class="banner-notes">{{ markdownExcerpt(todayBanner.notes, 140) }}</span>
-          </div>
-        </button>
-        <div class="banner-actions">
-          <button
-            v-if="todayBanner.live && nextStop"
-            class="banner-advance mono"
-            type="button"
-            title="Mark this stop as completed"
-            :aria-label="`Mark ${todayBanner.day.label || 'this stop'} as completed and jump to ${nextStop.label || 'the next stop'}`"
-            @click="advanceToNextStop"
-          ><span class="banner-advance-tick" aria-hidden="true">✓</span> Made it →</button>
-          <button class="banner-action" type="button" title="Edit this day" @click="editingDay = todayBanner.day">✎</button>
-          <button class="banner-close" type="button" title="Hide for this session" @click="dismissBanner">×</button>
-        </div>
-      </div>
 
       <div ref="mapEl" class="map"></div>
 
@@ -173,6 +125,27 @@
       <div v-if="mapData" class="map-topbar">
         <ModeToggleControl :mode="mode" @change="setMode" />
       </div>
+
+      <!-- Bottom "next stop" strip (M3) — replaces the top today-banner.
+           Carries the same data sources (todayBanner, bannerSpanWx,
+           sunsetCountdown, nextLegInfo, advanceToNextStop) plus inline
+           survival icon toggles that delegate to renderSurvival /
+           clearSurvival. -->
+      <MapBottomStrip
+        :banner="todayBanner"
+        :weather-chips="bannerSpanWx"
+        :next-stop="nextStop"
+        :next-leg-info="nextLegInfo"
+        :sunset-countdown="sunsetCountdown"
+        :dismissed="bannerDismissed"
+        :get-bounds="getMapBounds"
+        @go-day="onGoDay"
+        @edit-day="(d) => editingDay = d"
+        @advance="advanceToNextStop"
+        @dismiss="dismissBanner"
+        @render-survival="renderSurvival"
+        @clear-survival="clearSurvival"
+      />
     </div>
     </div>
 
@@ -279,7 +252,7 @@ import SunCalc from 'suncalc'
 import { formatTime, arrivalSafety } from '@/lib/sun.js'
 import { api } from '@/api.js'
 // Itinerary + geocode helpers imported below.
-import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX, markdownExcerpt, extractMarkerThumb } from '@/util.js'
+import { CATEGORIES, formatLat, formatLng, getMyLocation, parseGPX, trackColor, todayISO, coordsToGPX, extractMarkerThumb } from '@/util.js'
 import { geocode, categoryFromOSM, reverseGeocode } from '@/api.js'
 import Itinerary from '@/components/organisms/Itinerary.vue'
 import PointList from '@/components/molecules/PointList.vue'
@@ -292,6 +265,7 @@ import ElevationProfile from '@/components/molecules/ElevationProfile.vue'
 import InfoPanel from '@/components/organisms/InfoPanel.vue'
 import MapFab from '@/components/molecules/MapFab.vue'
 import TripRibbon from '@/components/molecules/TripRibbon.vue'
+import MapBottomStrip from '@/components/molecules/MapBottomStrip.vue'
 import PlanView from '@/components/organisms/PlanView.vue'
 import PasteImportModal from '@/components/organisms/PasteImportModal.vue'
 import ModeToggleControl from '@/components/atoms/ModeToggleControl.vue'
@@ -301,8 +275,8 @@ import { rememberMap, updateRecentStats } from '@/lib/recents.js'
 import { routeLeg, fmtMinutes } from '@/lib/routing.js'
 import { writeSnapshot } from '@/lib/snapshot.js'
 import { extractId, buildMapSlug } from '@/lib/slug.js'
-import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
-import { formatDistance, formatTempValue } from '@/lib/settings.js'
+import { dailyForecast } from '@/lib/weather.js'
+import { formatDistance } from '@/lib/settings.js'
 import { buildTipNode } from '@/lib/tooltip.js'
 
 const props = defineProps({
@@ -1617,7 +1591,6 @@ const today = computed(() => todayISO())
 
 function attachSun(banner) {
   if (!banner) return banner
-  if (window.matchMedia('(max-width: 720px)').matches) return banner
   const lat = banner.day.lat ?? mapData.value?.center_lat
   const lng = banner.day.lng ?? mapData.value?.center_lng
   if (lat == null || lng == null) return banner
@@ -1643,9 +1616,9 @@ function bannerNameFor(day) {
   return dayPlaceNames.value[day.id] || 'On the road'
 }
 
-// Used by the banner's CSS to push it below the trip ribbon (desktop only).
-// The ribbon is only rendered when there are itinerary days, so when there
-// are none we keep the banner at the smaller top offset.
+// Drives the offline-badge offset so it tucks under the ribbon when one is
+// present. Only meaningful on top-of-map chrome since the bottom strip lives
+// at the opposite edge.
 const hasRibbon = computed(() => (mapData.value?.itinerary || []).length > 0)
 
 // Day id of the stop the user just tapped from the ribbon, banner, or a stop
@@ -3052,181 +3025,6 @@ onBeforeUnmount(() => {
   text-underline-offset: 2px;
 }
 .link-pick:hover { color: var(--vermillion-deep); }
-
-/* Today banner — 2-line stack: primary row (tag + name) carries the
-   editorial weight; meta row (weather/sun/notes/next-leg) sits below in a
-   quieter mono color so the banner reads as ~half its previous height.
-   Sits below the trip ribbon when one is visible (desktop + itinerary
-   present); the .with-ribbon class manually offsets past the ribbon since
-   absolute positioning is relative to .map-wrap. Mobile hides the ribbon
-   entirely so .with-ribbon is a no-op there. */
-.today-banner {
-  position: absolute;
-  top: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 700;
-  display: inline-flex;
-  align-items: stretch;
-  background: var(--ink);
-  color: var(--paper);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-  max-width: calc(100% - 2rem);
-  overflow: hidden;
-}
-.today-banner.with-ribbon {
-  /* Push past the trip ribbon (5.5rem ≈ 88px) plus an 8px breathing gap.
-     Mobile drops back to the no-ribbon offset because the ribbon is hidden. */
-  top: calc(5.5rem + 8px);
-}
-@media (max-width: 720px) {
-  /* Mobile: ribbon is now visible too, so push the banner past it AND past
-     the topbar/topleft pills row (~52px after ribbon's ~52px). */
-  .today-banner.with-ribbon { top: calc(52px + 60px + 8px); }
-}
-.banner-main {
-  background: transparent;
-  border: none;
-  color: inherit;
-  padding: 0.4rem 0.7rem 0.4rem 0.5rem;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.15rem;
-  cursor: pointer;
-  overflow: hidden;
-  font: inherit;
-  text-align: left;
-  min-width: 0;
-}
-@media (max-width: 560px) {
-  /* Two-row layout on phones: tag stays inline with the title; the meta line
-     (weather + sun) wraps below so temps stop getting clipped. */
-  .today-banner { max-width: calc(100% - 1rem); }
-  .banner-main {
-    flex-wrap: wrap;
-    white-space: normal;
-    gap: 0.4rem 0.7rem;
-    padding: 0.45rem 0.55rem 0.5rem 0.5rem;
-  }
-  .banner-text { font-size: 0.92rem; flex-basis: 100%; }
-  .banner-tag { align-self: flex-start; }
-  .banner-wx, .banner-sun { font-size: 0.74rem; }
-}
-.banner-main:hover { background: rgba(255,255,255,0.06); }
-.banner-row {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.55rem;
-  white-space: nowrap;
-  overflow: hidden;
-  max-width: 100%;
-}
-/* Meta row (weather / sun / next-leg / notes) wraps onto multiple lines when
-   the banner can't fit them inline, instead of ellipsising mid-token (which
-   produced output like "31° / ... * 04:49 → 1…"). Each child still keeps
-   its own `nowrap` so individual values aren't broken across lines. */
-.banner-row-meta {
-  flex-wrap: wrap;
-  gap: 0.25rem 0.7rem;
-  white-space: normal;
-  overflow: visible;
-}
-.banner-row-meta > * {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-@media (max-width: 560px) {
-  /* Phones: drop the lower-priority "next leg" and free-form notes from the
-     meta row so the temperature/sun pair has room to breathe. The banner is
-     a glance affordance; the user can tap through for the full day card. */
-  .banner-next,
-  .banner-notes { display: none; }
-}
-.banner-actions { display: inline-flex; }
-.banner-action,
-.banner-close,
-.banner-advance {
-  background: transparent;
-  border: none;
-  border-left: 1px solid rgba(255,255,255,0.1);
-  color: var(--cream);
-  cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
-}
-.banner-action,
-.banner-close { width: 2.2rem; }
-.banner-advance {
-  padding: 0 0.75rem;
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  background: var(--vermillion);
-  color: var(--paper);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.banner-advance:hover { background: var(--vermillion-deep); }
-.banner-advance-tick {
-  font-size: 0.85rem;
-  line-height: 1;
-  letter-spacing: 0;
-}
-.banner-action:hover { background: var(--vermillion-deep); color: var(--paper); }
-.banner-close:hover { background: rgba(255,255,255,0.12); color: var(--paper); }
-.banner-next {
-  font-size: 0.74rem;
-  color: var(--cream);
-  opacity: 0.85;
-}
-.today-banner.is-live { background: var(--vermillion-deep); }
-.today-banner.is-live .banner-tag { background: var(--paper); color: var(--vermillion-deep); }
-.banner-tag {
-  display: inline-block;
-  background: var(--vermillion);
-  color: var(--paper);
-  font-size: 0.7rem;
-  letter-spacing: 0.16em;
-  padding: 0.15rem 0.5rem;
-  border-radius: 2px;
-  font-weight: 700;
-}
-.banner-text {
-  font-family: var(--display);
-  font-size: 1rem;
-  letter-spacing: 0.04em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.banner-sun,
-.banner-wx,
-.banner-notes {
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  color: rgba(255,255,255,0.65);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.banner-wx.is-active { color: rgba(255,255,255,0.95); font-weight: 600; }
-.banner-wx.is-faded { color: rgba(255,255,255,0.4); font-style: italic; }
-.banner-wx-tag {
-  font-size: 0.58rem;
-  letter-spacing: 0.16em;
-  color: rgba(255,255,255,0.45);
-  margin-right: 0.25rem;
-}
-.banner-notes {
-  font-family: var(--body);
-  letter-spacing: 0.01em;
-  color: rgba(255,255,255,0.55);
-  font-style: italic;
-}
 
 .candidate-modal {
   width: min(560px, 100%);
