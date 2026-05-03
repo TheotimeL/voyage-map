@@ -21,7 +21,6 @@ let calls = 0
 globalThis.fetch = async () => { calls++; return { ok: true } }
 const r = await preloadTiles(
   [{ z: 6, x: 1, y: 1 }, { z: 6, x: 2, y: 1 }],
-  'light',
   { concurrency: 2 },
 )
 assert.equal(r.done, 2)

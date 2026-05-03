@@ -1322,7 +1322,6 @@ function trailStats(p) {
   color: var(--ink);
   font-family: var(--mono);
 }
-[data-theme="dark"] .themed-date { color-scheme: dark; }
 .themed-date::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.7;

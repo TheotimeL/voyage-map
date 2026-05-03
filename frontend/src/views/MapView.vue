@@ -31,8 +31,6 @@
       </template>
       <template #head-tools>
         <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
-        <ThemeToggle class="head-icon hide-mobile" />
-        <button class="head-icon mono" type="button" title="Tools — survival, sun, offline tiles" @click.stop="toolsOpen = !toolsOpen">⋯</button>
         <button class="head-icon mono hide-mobile" type="button" title="Re-fit map to all points and days" @click="recenter">↻</button>
         <RouterLink :to="{ path: '/', query: { home: 1 } }" class="head-icon mono hide-mobile" title="Start a new voyage" style="text-decoration: none;">＋</RouterLink>
       </template>
@@ -107,6 +105,16 @@
       <div ref="mapEl" class="map"></div>
 
       <button
+        v-if="hasContent"
+        class="recenter-me"
+        type="button"
+        title="Re-fit map to all points and days"
+        @click="recenter"
+      >
+        <span class="recenter-glyph">↻</span>
+      </button>
+
+      <button
         class="locate-me"
         type="button"
         :class="{ on: myDot }"
@@ -125,40 +133,6 @@
         @add-stop="onFabAddStop"
       />
       <div v-if="dropMode" class="drop-hint mono">Click anywhere on the map to drop your pin</div>
-
-      <!-- Persistent Tools chip strip — surfaces the survival finders + offline
-           cache without needing the user to open the ⋯ popover. Each survival
-           chip toggles its kind in the shared selected-set; turning any kind
-           on while the layer is off enables it (and vice versa: clearing the
-           last kind disables the layer). The "Offline" chip opens the Tools
-           popover focused on PrecacheButton, since a one-click cache without
-           scope/progress UI would surprise the user. Docked top-of-map on
-           desktop (sits below the banner, left of the FAB column); on mobile
-           it docks to the bottom-center, well clear of the FAB / locate-me
-           column on the right and Leaflet zoom controls on the left. -->
-      <div v-if="mapData" class="tools-strip mono" :class="{ 'with-ribbon': hasRibbon }" role="toolbar" aria-label="Map tools">
-        <button
-          v-for="k in SURVIVAL_KINDS"
-          :key="k.key"
-          type="button"
-          class="tools-strip-chip"
-          :class="{ on: survivalSelected.has(k.key) && survivalEnabled }"
-          :title="`Toggle ${k.label.toLowerCase()} finder`"
-          @click="onStripKindToggle(k.key)"
-        >
-          <span class="tools-strip-icon" aria-hidden="true">{{ k.icon }}</span>
-          <span class="tools-strip-label">{{ k.label }}</span>
-        </button>
-        <button
-          type="button"
-          class="tools-strip-chip"
-          title="Pre-cache offline tiles for this trip"
-          @click="focusToolsOffline"
-        >
-          <span class="tools-strip-icon" aria-hidden="true">⤓</span>
-          <span class="tools-strip-label">Offline</span>
-        </button>
-      </div>
 
       <Transition name="fade">
         <div v-if="gpxDragging" class="dropzone">
@@ -186,35 +160,18 @@
         @close="activeTrailPointId = null"
       />
 
-      <!-- Top-left: trip identity (editable title + offline badge). Kept thin
-           and discreet so it doesn't compete with the ribbon for attention.
-           On mobile, the trip ribbon already shows the trip identity at the
-           top of the screen, and the title pill collides with the topbar
-           pill on the right — so we hide it whenever the ribbon is present. -->
-      <div v-if="mapData" class="map-topleft" :class="{ 'has-ribbon': hasRibbon }">
-        <input
-          v-model="titleDraft"
-          class="map-topleft-title"
-          placeholder="Untitled voyage"
-          maxlength="120"
-          :title="titleDraft || 'Untitled voyage'"
-          @blur="commitTitle"
-          @keydown.enter="$event.target.blur()"
-        />
-        <span v-if="offlineSnapshot" class="offline-badge mono" title="No network — showing the last copy saved on this device.">⤬ offline</span>
+      <!-- Offline badge (top-left, only when serving from snapshot). The trip
+           title and the right-side toolbar pill were removed in M1 — the only
+           top-of-map chrome left in map mode is the ribbon and the mode toggle. -->
+      <div v-if="mapData && offlineSnapshot" class="map-topleft" :class="{ 'has-ribbon': hasRibbon }">
+        <span class="offline-badge mono" title="No network — showing the last copy saved on this device.">⤬ offline</span>
       </div>
 
-      <!-- Map-mode floating top-right toolbar. Compact: just the mode toggle
-           + the actions that need a home now that the dock is gone. -->
+      <!-- Mode toggle (plan / map) — kept top-right where the toolbar pill
+           used to live so user muscle memory carries over. Final placement
+           may move; M1 minimum is "exists and switches modes". -->
       <div v-if="mapData" class="map-topbar">
         <ModeToggleControl :mode="mode" @change="setMode" />
-        <div class="map-topbar-actions">
-          <button v-if="hasContent" class="head-icon mono hide-mobile" type="button" @click="recenter" title="Re-fit map to all points and days">↻</button>
-          <button class="head-icon mono" type="button" :title="copied ? 'Read-only link copied' : 'Copy read-only share link'" @click="copyShareUrl">{{ copied ? '✓' : '↗' }}</button>
-          <ThemeToggle class="head-icon hide-mobile" />
-          <button class="head-icon mono" type="button" title="Tools — survival, sun, offline tiles" @click.stop="toolsOpen = !toolsOpen">⋯</button>
-        </div>
-        <span v-if="offlineSnapshot" class="offline-badge mono" title="No network — showing the last copy saved on this device.">⤬ offline</span>
       </div>
     </div>
     </div>
@@ -249,41 +206,6 @@
     <Transition name="toast">
       <div v-if="undoFlash" class="undo-toast mono" role="status" aria-live="polite">
         ↶ {{ undoFlash }}
-      </div>
-    </Transition>
-
-    <!-- Tools popover — shared by both modes. Anchored to the ⋯ button in the
-         topbar (Map mode) or in the Plan head-tools slot (Plan mode). Lives
-         outside the map-shell so it floats above either layout. v-show (not
-         v-if) so child state — like SurvivalLayer's selected-kinds set — is
-         retained across open/close cycles. -->
-    <Transition name="reveal">
-      <div v-if="mapData" v-show="toolsOpen" class="tools-popover paper" @click.stop>
-        <div class="tools-head">
-          <p class="eyebrow">Tools</p>
-          <button class="tools-close" type="button" @click="toolsOpen = false">×</button>
-        </div>
-        <MoreMenu
-          :fallback-lat="mapData.center_lat"
-          :fallback-lng="mapData.center_lng"
-          :get-bounds="getMapBounds"
-          :theme="theme"
-          :place-name="todayBanner?.day?.label || ''"
-          :next-leg-bbox="nextLegBbox"
-          :survival-selected="survivalSelected"
-          :survival-enabled="survivalEnabled"
-          @update:survival-selected="(v) => (survivalSelected = v)"
-          @update:survival-enabled="(v) => (survivalEnabled = v)"
-          @render-survival="renderSurvival"
-          @clear-survival="clearSurvival"
-        />
-        <div class="tools-extra">
-          <button class="btn btn-tiny btn-ghost" type="button" @click="openPasteFromTools">Paste import…</button>
-          <label class="btn btn-tiny btn-ghost" :title="`Drop a .gpx track on the map, or pick a file`">
-            GPX import…
-            <input type="file" accept=".gpx,application/gpx+xml" multiple class="hidden" @change="onGpxFilePick" />
-          </label>
-        </div>
       </div>
     </Transition>
 
@@ -368,15 +290,12 @@ import GeocoderSearch from '@/components/molecules/GeocoderSearch.vue'
 import CategoryFilters from '@/components/molecules/CategoryFilters.vue'
 import ElevationProfile from '@/components/molecules/ElevationProfile.vue'
 import InfoPanel from '@/components/organisms/InfoPanel.vue'
-import MoreMenu from '@/components/molecules/MoreMenu.vue'
 import MapFab from '@/components/molecules/MapFab.vue'
-import ThemeToggle from '@/components/atoms/ThemeToggle.vue'
 import TripRibbon from '@/components/molecules/TripRibbon.vue'
 import PlanView from '@/components/organisms/PlanView.vue'
 import PasteImportModal from '@/components/organisms/PasteImportModal.vue'
 import ModeToggleControl from '@/components/atoms/ModeToggleControl.vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { theme } from '@/lib/theme.js'
 import { buildElevationSeries, elevationStats } from '@/lib/elevation.js'
 import { rememberMap, updateRecentStats } from '@/lib/recents.js'
 import { routeLeg, fmtMinutes } from '@/lib/routing.js'
@@ -385,7 +304,6 @@ import { extractId, buildMapSlug } from '@/lib/slug.js'
 import { dailyForecast, glyphFor as wxGlyph } from '@/lib/weather.js'
 import { formatDistance, formatTempValue } from '@/lib/settings.js'
 import { buildTipNode } from '@/lib/tooltip.js'
-import { SURVIVAL_KINDS, fetchSurvival } from '@/lib/overpass.js'
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -433,63 +351,8 @@ function onMqChange(e) { isMobile.value = e.matches }
 onMounted(() => mqMobile.addEventListener('change', onMqChange))
 onBeforeUnmount(() => mqMobile.removeEventListener('change', onMqChange))
 
-// Tools popover state: holds the MoreMenu (survival, sun, precache) and Paste
-// import — surfaced in both modes via a top-right ⋯ button so the dock-only
-// tools don't disappear when the dock does.
-const toolsOpen = ref(false)
 const showPaste = ref(false)
-function openPasteFromTools() { toolsOpen.value = false; showPaste.value = true }
 
-// Controlled state for the survival layer — owned here (not inside the
-// MoreMenu's SurvivalLayer) so the persistent Tools chip strip below the
-// map can drive the same set without diverging. Default kinds match what
-// the panel shipped with so the long-tested defaults are preserved.
-const survivalSelected = ref(new Set(['water', 'dump', 'toilet', 'trash']))
-const survivalEnabled = ref(false)
-function focusToolsOffline() {
-  // Bottom strip "Offline" chip: opens the Tools popover so the user lands
-  // on the PrecacheButton with all its scope toggles. Keeping the heavy
-  // pre-cache UI inside the popover (instead of inlining it on the strip)
-  // avoids cluttering the chip row with progress bars.
-  toolsOpen.value = true
-}
-
-// Click handler for the persistent Tools chip strip. Mirrors SurvivalLayer's
-// internal toggleKind but drives the layer fetch directly from here so the
-// user never has to open the ⋯ popover to discover the finders. Logic:
-//   - If layer is off and kind is being added → enable + fetch with that kind.
-//   - If layer is on and the new selected-set is non-empty → re-fetch.
-//   - If the new selected-set is empty (last chip turned off) → clear layer.
-async function onStripKindToggle(kind) {
-  const next = new Set(survivalSelected.value)
-  if (next.has(kind)) next.delete(kind)
-  else next.add(kind)
-  survivalSelected.value = next
-  if (next.size === 0) {
-    survivalEnabled.value = false
-    clearSurvival()
-    return
-  }
-  survivalEnabled.value = true
-  try {
-    const items = await fetchSurvival(getMapBounds(), [...next])
-    renderSurvival(items)
-  } catch (err) {
-    error.value = err?.message || 'Could not fetch nearby spots.'
-    survivalEnabled.value = false
-    clearSurvival()
-  }
-}
-// No emoji — the cream/ink palette plus typographic eyebrows do the visual
-// work; color emoji clash with the paper aesthetic. Glyphs below are
-// monoglyph unicode marks (chevron / pin-shape / dots) that pick up the
-// surrounding text color.
-const tabs = [
-  { key: 'itinerary', label: 'Trip', icon: '◷' },
-  { key: 'places', label: 'Pins', icon: '⌖' },
-  { key: 'more', label: 'Tools', icon: '⋯' },
-]
-// Default to the Trip tab — users open the app to plan, not to browse pins.
 const activeId = ref(null)
 const modal = ref(null)
 const detail = ref(null)
@@ -740,8 +603,6 @@ watch(activeId, (next, prev) => {
   }
 })
 
-watch(theme, () => { if (leaflet) attachTiles() })
-
 // Keep the recents stats in sync as the user edits the map. Without this the
 // home page would still report whatever counts existed when the map last
 // loaded (a recurring "0 pins" bug).
@@ -793,8 +654,7 @@ const mapEl = ref(null)
 let leaflet = null
 let tileLayer = null
 function tileUrl() {
-  const style = theme.value === 'dark' ? 'dark_all' : 'light_all'
-  return `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`
+  return `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png`
 }
 function attachTiles() {
   if (tileLayer) leaflet.removeLayer(tileLayer)
@@ -2505,15 +2365,6 @@ watch(mode, async (next) => {
   }
 })
 
-// Click-outside handler for the tools popover.
-function onDocClickTools(e) {
-  if (!toolsOpen.value) return
-  const inside = e.target.closest?.('.tools-popover, [title^="Tools"]')
-  if (!inside) toolsOpen.value = false
-}
-onMounted(() => document.addEventListener('click', onDocClickTools, true))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClickTools, true))
-
 // Share URL: `/v/{slug}` is the read-only mirror; copying that instead of
 // `/m/{slug}` means the recipient can't accidentally edit the host's trip.
 // We share the display slug (name-slug + id) when the trip is titled so the
@@ -3092,6 +2943,33 @@ onBeforeUnmount(() => {
 .locate-me.on { background: #3b82f6; border-color: #1e40af; color: #fff; box-shadow: 0 3px 0 #1e40af, 0 6px 12px rgba(0,0,0,0.18); }
 .locate-me.on:hover { background: #1e40af; }
 .locate-glyph { font-size: 1.3rem; line-height: 1; font-weight: 700; }
+
+/* Recenter button — sits one slot above locate-me in the bottom-right cluster.
+   Mirrors locate-me's visual treatment so the trio (recenter / locate / FAB)
+   reads as a single column. */
+.recenter-me {
+  position: absolute;
+  bottom: 160px; /* locate-me bottom (88) + 56 height + 16 gap */
+  right: 16px;
+  z-index: 700;
+  width: 56px;
+  height: 56px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 3px 0 var(--ink), 0 6px 12px rgba(0, 0, 0, 0.18);
+  transition: transform 80ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.recenter-me:hover { background: var(--ink); color: var(--paper); }
+.recenter-me:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+@media (max-width: 720px) {
+  .recenter-me { bottom: 224px; } /* locate-me bottom (152) + 56 + 16 */
+}
+.recenter-glyph { font-size: 1.3rem; line-height: 1; font-weight: 700; }
 
 /* GPX dropzone */
 .dropzone {

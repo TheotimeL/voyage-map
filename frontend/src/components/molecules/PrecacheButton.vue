@@ -51,7 +51,6 @@ const props = defineProps({
   // "Next leg" segment is disabled. Comes from the parent because computing
   // it requires the live itinerary state.
   nextLegBbox: { type: Object, default: null },
-  theme: { type: String, default: 'light' },
 })
 
 const running = ref(false)
@@ -90,7 +89,7 @@ async function run() {
       tiles = tilesForBbox(props.bbox, [6, 12])
     }
     total.value = tiles.length
-    await preloadTiles(tiles, props.theme, {
+    await preloadTiles(tiles, {
       onProgress: ({ done: d, failed: f }) => { done.value = d; failed.value = f },
     })
     lastDone.value = new Date().toISOString()

@@ -24,13 +24,12 @@ export function tilesForBbox(bbox, [zMin, zMax]) {
   return out
 }
 
-export function tileUrl({ z, x, y }, theme = 'light') {
+export function tileUrl({ z, x, y }) {
   const sd = SUBDOMAINS[(x + y) % SUBDOMAINS.length]
-  const style = theme === 'dark' ? 'dark_all' : 'light_all'
-  return `https://${sd}.basemaps.cartocdn.com/${style}/${z}/${x}/${y}.png`
+  return `https://${sd}.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`
 }
 
-export async function preloadTiles(tiles, theme, { onProgress, signal, concurrency = 6 } = {}) {
+export async function preloadTiles(tiles, { onProgress, signal, concurrency = 6 } = {}) {
   let done = 0, failed = 0
   const total = tiles.length
   const queue = tiles.slice()
@@ -40,7 +39,7 @@ export async function preloadTiles(tiles, theme, { onProgress, signal, concurren
       if (signal?.aborted) return
       const t = queue.shift()
       try {
-        const res = await fetch(tileUrl(t, theme), { mode: 'cors', cache: 'force-cache' })
+        const res = await fetch(tileUrl(t), { mode: 'cors', cache: 'force-cache' })
         if (!res.ok) failed++
       } catch { failed++ }
       done++

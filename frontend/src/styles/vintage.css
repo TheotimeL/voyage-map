@@ -297,8 +297,6 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   pointer-events: none;
 }
-[data-theme="dark"] .iti-pin-pins { border-color: var(--ink); }
-
 /* Itinerary day label tooltip on the map */
 .leaflet-tooltip.iti-tip {
   background: rgba(255, 255, 255, 0.92);
@@ -316,11 +314,6 @@ input[type="range"]::-moz-range-thumb {
 .leaflet-tooltip.iti-tip::before { display: none; }
 .iti-tip .iti-tip-num { font-weight: 700; }
 .iti-tip .iti-tip-label { color: var(--ink-soft); margin-left: 0.35rem; }
-[data-theme="dark"] .leaflet-tooltip.iti-tip {
-  background: rgba(20, 23, 26, 0.92);
-  color: var(--ink);
-  border-color: var(--cream-edge);
-}
 
 /* Tier 1 — continental zoom (< 7): hide pin tooltips, but keep a pared-back
    leg chip (just the duration) so the user still feels the trip's tempo. */
@@ -451,32 +444,6 @@ body.sheet-expanded .locate-me { display: none; }
 body.drop-mode .leaflet-grab,
 body.drop-mode .leaflet-grab .leaflet-interactive { cursor: crosshair !important; }
 
-[data-theme="dark"] {
-  --paper: #14171a;
-  --cream: #1c2024;
-  --cream-deep: #0f1114;
-  --cream-edge: #2a2f35;
-  --ink: #ebe5d8;
-  --ink-soft: #b8b2a4;
-  --ink-faded: #6e6a62;
-  --vermillion: #ff7a55;
-  --vermillion-deep: #e85d3c;
-}
-
-[data-theme="dark"] body { background: var(--paper); color: var(--ink); }
-[data-theme="dark"] .map { background: var(--cream-deep); }
-
-[data-theme="dark"] .pin { filter: drop-shadow(0 0 1px rgba(255,255,255,0.4)); }
-[data-theme="dark"] .leaflet-container { background: #0c0e10; }
-
-/* Theme-toggle transition — paint the palette change as a quick wash
-   instead of a hard flip. Scoped to body and .paper surfaces (the dock,
-   sheet, modals); the Leaflet tile layer swaps as a hard server boundary
-   so we deliberately leave it untransitioned. */
-body,
-.paper {
-  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
-}
 @media (prefers-reduced-motion: reduce) {
   body,
   .paper { transition: none; }
